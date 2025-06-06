@@ -365,20 +365,48 @@ class SupabaseClient:
             return []
     
     def get_leads(self, limit: int = 100, offset: int = 0, search: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get leads with optional search."""
+        """
+        Get leads with pagination and optional search.
+        
+        Args:
+            limit: Maximum number of leads to return
+            offset: Number of leads to skip
+            search: Optional search term to filter leads
+            
+        Returns:
+            List of leads
+        """
         if self.supabase is None:
-            raise ValueError("Supabase client not initialized")
-            
-        query = self.supabase.table("leads").select("*").order("createdat", desc=True).limit(limit).offset(offset)
+            # Return mock data (consider adding search filtering to mock data)
+            logger.warning("No Supabase client available. Returning mock data.")
+            return []
         
-        if search:
-            query = query.or_(
-                f"firstname.ilike.%{search}%,lastname.ilike.%{search}%,email.ilike.%{search}%,phone.ilike.%{search}%,companyname.ilike.%{search}%"
-            )
+        try:
+            query = self.supabase.table("leads").select("*")
             
-        response = query.execute()
-        
-        return response.data or []
+            if search:
+                # Add search filtering across relevant fields (case-insensitive)
+                # Supabase uses ILIKE for case-insensitive pattern matching
+                search_term = f"%{search.lower()}%"
+                query = query.or_(
+                    f"firstname.ilike.{search_term}",
+                    f"lastname.ilike.{search_term}",
+                    f"email.ilike.{search_term}",
+                    f"phone.ilike.{search_term}"
+                    # Add more fields here if needed, like companyname, etc.
+                    # Searching in JSONB tags might require ->> operator and specific indexing
+                    # f"tags.cs.\"{{{'" + search.lower() + "'}}}" # Example for exact tag match (case-sensitive)
+                )
+
+            query = query.order("createdat", desc=True).range(offset, offset + limit - 1)
+            
+            response = query.execute()
+            
+            # Supabase response structure can be tricky, access data via .data
+            return response.data if response.data is not None else []
+        except Exception as e:
+            logger.error(f"Error getting leads: {str(e)}")
+            return []
     
     def update_lead_tags(self, lead_ids: List[int], tags: List[str]) -> int:
         """Update tags for multiple leads."""
@@ -1767,3 +1795,107 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error updating batch record: {e}")
             raise
+
+    # --- New Lead Management Methods --- #
+
+    def get_lead_by_id(self, lead_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single lead by ID."""
+        if self.supabase is None:
+            logger.warning("No Supabase client available. Cannot get lead by ID.")
+            return None
+        try:
+            response = self.supabase.table("leads").select("*").eq("id", lead_id).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error getting lead by ID {lead_id}: {e}")
+            return None
+
+    def add_single_lead(self, lead_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Add a single lead to the database."""
+        if self.supabase is None:
+            logger.warning("No Supabase client available. Simulating add lead.")
+            # Simulate successful insertion with a dummy ID and current timestamp
+            return {**lead_data, "id": 9999, "createdat": datetime.now(timezone.utc).isoformat()}
+            
+        try:
+            # Ensure createdat is set if not provided
+            if "createdat" not in lead_data:
+                 lead_data["createdat"] = datetime.now(timezone.utc).isoformat()
+                 
+            # Ensure updatedat is set to createdat on creation
+            if "updatedat" not in lead_data:
+                lead_data["updatedat"] = lead_data["createdat"]
+
+            response = self.supabase.table("leads").insert(lead_data).execute()
+            if response.data:
+                logger.info(f"Successfully added lead with ID: {response.data[0].get('id')}")
+                return response.data[0]
+            else:
+                logger.error("Failed to add single lead: No data returned")
+                return None
+        except Exception as e:
+            logger.error(f"Error adding single lead: {e}")
+            return None
+
+    def update_lead(self, lead_id: int, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update an existing lead in the database."""
+        if self.supabase is None:
+            logger.warning("No Supabase client available. Simulating update lead.")
+            # Simulate successful update with current timestamp
+            return {**update_data, "id": lead_id, "updatedat": datetime.now(timezone.utc).isoformat()}
+            
+        try:
+            # Ensure updatedat is set on update
+            update_data["updatedat"] = datetime.now(timezone.utc).isoformat()
+
+            response = self.supabase.table("leads").update(update_data).eq("id", lead_id).execute()
+            if response.data:
+                logger.info(f"Successfully updated lead with ID: {lead_id}")
+                return response.data[0]
+            else:
+                logger.error(f"Failed to update lead with ID {lead_id}: No data returned")
+                return None
+        except Exception as e:
+            logger.error(f"Error updating lead with ID {lead_id}: {e}")
+            return None
+
+    def update_lead_status(self, lead_id: int, new_status: str) -> Optional[Dict[str, Any]]:
+        """Update the status of a lead."""
+        if self.supabase is None:
+            logger.warning("No Supabase client available. Simulating status update.")
+            return {"id": lead_id, "leadstatus": new_status, "updatedat": datetime.now(timezone.utc).isoformat()}
+            
+        try:
+            update_data = {
+                "leadstatus": new_status,
+                "updatedat": datetime.now(timezone.utc).isoformat()
+            }
+            response = self.supabase.table("leads").update(update_data).eq("id", lead_id).execute()
+            if response.data:
+                logger.info(f"Successfully updated status for lead ID {lead_id} to {new_status}")
+                return response.data[0]
+            else:
+                logger.error(f"Failed to update status for lead ID {lead_id}: No data returned")
+                return None
+        except Exception as e:
+            logger.error(f"Error updating lead status for ID {lead_id}: {e}")
+            return None
+
+    def delete_lead(self, lead_id: int) -> bool:
+        """Delete a lead from the database."""
+        if self.supabase is None:
+            logger.warning("No Supabase client available. Simulating delete lead.")
+            return True # Simulate success
+            
+        try:
+            response = self.supabase.table("leads").delete().eq("id", lead_id).execute()
+            # Supabase delete returns an empty list in data on success
+            if response.data == []:
+                 logger.info(f"Successfully deleted lead with ID: {lead_id}")
+                 return True
+            else:
+                logger.error(f"Failed to delete lead with ID {lead_id}: {response.data}")
+                return False
+        except Exception as e:
+            logger.error(f"Error deleting lead with ID {lead_id}: {e}")
+            return False

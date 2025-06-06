@@ -37,7 +37,11 @@ from models import ( # Changed from relative to absolute import
     LeadEnrichmentRequest,
     AutoMappingRequest,
     DuplicateCheckRequest,
-    ProcessLeadsRequest
+    ProcessLeadsRequest,
+    LeadResponse,
+    LeadCreateRequest,
+    LeadUpdateRequest,
+    LeadStatusUpdateRequest
 )
 from data_processor import DataProcessor
 from database import SupabaseClient
@@ -306,6 +310,151 @@ async def health_check():
 
 # Include routers
 app.include_router(upload_router, prefix="/api")
+
+# --- Lead Management Endpoints --- #
+
+@app.get("/api/leads", response_model=List[LeadResponse])
+async def get_leads_endpoint(
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    search: Optional[str] = Query(None),
+    current_user: Dict = Depends(get_current_user) # Add authentication
+):
+    """Fetch leads with pagination and optional search."""
+    logger.info(f"Fetching leads for user: {current_user.get('id')}")
+    try:
+        # Assuming get_leads method in SupabaseClient supports limit, offset, and search
+        leads = db.get_leads(limit=limit, offset=offset, search=search)
+        # Ensure fetched data matches LeadResponse model (handling None for optional fields)
+        return [
+            LeadResponse(**lead)
+            for lead in leads
+        ] if leads else []
+    except Exception as e:
+        logger.error(f"Error fetching leads: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching leads: {str(e)}")
+
+@app.post("/api/leads", response_model=LeadResponse, status_code=201)
+async def add_lead_endpoint(
+    lead_data: LeadCreateRequest,
+    current_user: Dict = Depends(get_current_user) # Add authentication
+):
+    """Add a new lead."""
+    logger.info(f"Adding new lead for user: {current_user.get('id')}")
+    try:
+        # Convert Pydantic model to dictionary for database insertion
+        lead_dict = lead_data.model_dump(exclude_unset=True)
+        
+        # Add uploadedby if user is authenticated and not system
+        if current_user and current_user.get('id') != 'system':
+             lead_dict['uploadedby'] = current_user.get('id')
+
+        new_lead = db.add_single_lead(lead_dict)
+        
+        if new_lead:
+            return LeadResponse(**new_lead)
+        else:
+            raise HTTPException(status_code=500, detail="Failed to add lead to database")
+            
+    except Exception as e:
+        logger.error(f"Error adding lead: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error adding lead: {str(e)}")
+
+@app.get("/api/leads/{lead_id}", response_model=LeadResponse)
+async def get_lead_endpoint(
+    lead_id: int,
+    current_user: Dict = Depends(get_current_user) # Add authentication
+):
+    """Get a single lead by ID."""
+    logger.info(f"Fetching lead {lead_id} for user: {current_user.get('id')}")
+    try:
+        lead = db.get_lead_by_id(lead_id)
+        if lead:
+            return LeadResponse(**lead)
+        else:
+            raise HTTPException(status_code=404, detail="Lead not found")
+    except Exception as e:
+        logger.error(f"Error fetching lead {lead_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching lead {lead_id}: {str(e)}")
+
+@app.put("/api/leads/{lead_id}", response_model=LeadResponse)
+async def update_lead_endpoint(
+    lead_id: int,
+    update_data: LeadUpdateRequest,
+    current_user: Dict = Depends(get_current_user) # Add authentication
+):
+    """Update an existing lead by ID."""
+    logger.info(f"Updating lead {lead_id} for user: {current_user.get('id')}")
+    try:
+        # Convert Pydantic model to dictionary for database update
+        update_dict = update_data.model_dump(exclude_unset=True)
+        
+        # Ensure lead exists before attempting update
+        existing_lead = db.get_lead_by_id(lead_id)
+        if not existing_lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        updated_lead = db.update_lead(lead_id, update_dict)
+        
+        if updated_lead:
+            return LeadResponse(**updated_lead)
+        else:
+             # This case might happen if the update operation somehow fails silently in the DB layer
+            raise HTTPException(status_code=500, detail="Failed to update lead in database")
+            
+    except Exception as e:
+        logger.error(f"Error updating lead {lead_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error updating lead {lead_id}: {str(e)}")
+
+@app.patch("/api/leads/{lead_id}/status", response_model=LeadResponse)
+async def update_lead_status_endpoint(
+    lead_id: int,
+    status_update: LeadStatusUpdateRequest,
+    current_user: Dict = Depends(get_current_user) # Add authentication
+):
+    """Update the status of a lead by ID."""
+    logger.info(f"Updating status for lead {lead_id} to {status_update.leadstatus} for user: {current_user.get('id')}")
+    try:
+        # Ensure lead exists before attempting status update
+        existing_lead = db.get_lead_by_id(lead_id)
+        if not existing_lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+            
+        updated_lead = db.update_lead_status(lead_id, status_update.leadstatus)
+        
+        if updated_lead:
+            return LeadResponse(**updated_lead)
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update lead status in database")
+            
+    except Exception as e:
+        logger.error(f"Error updating lead status for {lead_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error updating lead status for {lead_id}: {str(e)}")
+
+@app.delete("/api/leads/{lead_id}", status_code=200)
+async def delete_lead_endpoint(
+    lead_id: int,
+    current_user: Dict = Depends(get_current_user) # Add authentication
+):
+    """Delete a lead by ID."""
+    logger.info(f"Deleting lead {lead_id} for user: {current_user.get('id')}")
+    try:
+        # Ensure lead exists before attempting deletion
+        existing_lead = db.get_lead_by_id(lead_id)
+        if not existing_lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+            
+        success = db.delete_lead(lead_id)
+        
+        if success:
+            # Return a success message or status
+            return {"message": f"Lead with ID {lead_id} deleted successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete lead from database")
+            
+    except Exception as e:
+        logger.error(f"Error deleting lead {lead_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error deleting lead {lead_id}: {str(e)}")
 
 # Ensure uvicorn run is guarded for module execution
 if __name__ == "__main__":

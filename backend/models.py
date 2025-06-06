@@ -255,3 +255,91 @@ class ProcessLeadsRequest(BaseModel):
     source: Optional[str] = "file_upload"
     supplier_id: Optional[int] = None
     user_id: Optional[int] = None
+
+# Model for creating a new lead
+class LeadCreateRequest(BaseModel):
+    email: Optional[str] = None
+    firstname: Optional[str] = None
+    lastname: Optional[str] = None
+    phone: Optional[str] = None
+    companyname: Optional[str] = None
+    taxid: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zipcode: Optional[str] = None
+    country: Optional[str] = None
+    leadsource: Optional[str] = None
+    leadstatus: Optional[str] = "New" # Default status
+    leadscore: Optional[int] = 0
+    leadcost: Optional[float] = 0.0
+    exclusivity: Optional[bool] = False
+    exclusivitynotes: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    tags: Optional[List[str]] = []
+    clientid: Optional[int] = None
+    supplierid: Optional[int] = None
+    uploadedby: Optional[int] = None # User ID of who added/uploaded
+
+# Model for updating an existing lead
+class LeadUpdateRequest(BaseModel):
+    email: Optional[str] = None
+    firstname: Optional[str] = None
+    lastname: Optional[str] = None
+    phone: Optional[str] = None
+    companyname: Optional[str] = None
+    taxid: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zipcode: Optional[str] = None
+    country: Optional[str] = None
+    leadsource: Optional[str] = None
+    leadstatus: Optional[str] = None
+    leadscore: Optional[int] = None
+    leadcost: Optional[float] = None
+    exclusivity: Optional[bool] = None
+    exclusivitynotes: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    tags: Optional[List[str]] = None
+    clientid: Optional[int] = None
+    supplierid: Optional[int] = None
+    uploadedby: Optional[int] = None
+
+# Model for updating lead status
+class LeadStatusUpdateRequest(BaseModel):
+    leadstatus: str
+
+# Model for returning lead data (matches schema)
+class LeadResponse(BaseModel):
+    id: int
+    email: Optional[str]
+    firstname: Optional[str]
+    lastname: Optional[str]
+    phone: Optional[str]
+    companyname: Optional[str]
+    taxid: Optional[str]
+    address: Optional[str]
+    city: Optional[str]
+    state: Optional[str]
+    zipcode: Optional[str]
+    country: Optional[str]
+    leadsource: Optional[str]
+    leadstatus: Optional[str]
+    leadscore: Optional[int]
+    leadcost: Optional[float]
+    exclusivity: Optional[bool]
+    exclusivitynotes: Optional[str]
+    uploadbatchid: Optional[int]
+    clientid: Optional[int]
+    supplierid: Optional[int]
+    metadata: Optional[Dict[str, Any]]
+    tags: Optional[List[str]]
+    createdat: datetime
+    updatedat: Optional[datetime] # Added updatedat based on schema
+
+# Add forward references if needed for circular dependencies
+LeadCreateRequest.model_rebuild()
+LeadUpdateRequest.model_rebuild()
+LeadStatusUpdateRequest.model_rebuild()
+LeadResponse.model_rebuild()
