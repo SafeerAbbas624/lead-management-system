@@ -3,46 +3,172 @@ import difflib
 from typing import List, Dict, Any, Optional
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from models import DuplicateCheckRequest, AutoMappingRequest, ProcessLeadsRequest
 from database import SupabaseClient
 from data_processor import DataProcessor
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Initialize router
+router = APIRouter()
+
+# Initialize Supabase client
+supabase_client = SupabaseClient()
+
+class MappingRule(BaseModel):
+    sourceField: str
+    targetField: str
+    confidence: float
+    isRequired: bool
+
+class ProcessLeadsRequest(BaseModel):
+    """Request model for processing leads."""
+    data: List[Dict[str, Any]]
+    mappings: List[Dict[str, str]]
+    cleaningSettings: Optional[Dict[str, Any]] = None
+    normalizationSettings: Optional[Dict[str, Any]] = None
+    filename: Optional[str] = None  # Add filename field
+
+# Map of internal fields to descriptions (for max accuracy)
+FIELD_DESCRIPTIONS = {
+    "email": "Email address of the lead",
+    "firstname": "First name of the contact",
+    "lastname": "Last name of the contact",
+    "phone": "Phone number or mobile number",
+    "companyname": "Company or business name",
+    "address": "Address or street address",
+    "city": "City",
+    "state": "State or province",
+    "zipcode": "Zip code or postal code",
+    "country": "Country",
+    "taxid": "Tax ID or EIN number",
+    "loanamount": "Loan amount or requested amount",
+    "revenue": "Annual revenue or sales",
+    "dnc": "Do not call status or flag"
+}
+
 class NLPFieldMapper:
-    """Advanced NLP-based field mapping using multiple techniques."""
+    """Advanced NLP-based field mapping using sentence transformers."""
     
     def __init__(self):
-        self.field_patterns = {
-            "firstName": ["first", "fname", "given", "forename", "firstname", "first_name", "f_name"],
-            "lastName": ["last", "lname", "surname", "family", "lastname", "last_name", "l_name"],
-            "email": ["email", "mail", "e-mail", "emailaddress", "email_address", "e_mail"],
-            "phone": ["phone", "phone1", "","mobile", "cell", "tel", "telephone", "phonenumbers", "phone_number", "contact"],
-            "companyname": ["company", "business", "organization", "employer", "companyname", "company_name", "org", "biz"],
-            "address": ["address", "street", "addr", "streetaddress", "street_address", "location", "address1", "address2", "address_line_1", "address_line_2"],
-            "city": ["city", "town", "municipality", "locality"],
-            "state": ["state", "province", "region", "st", "prov", "territory"],
-            "zipCode": ["zip", "postal", "postcode", "zipcode", "zip_code", "postal_code", "pincode"],
-            "country": ["country", "nation", "cntry", "nationality"],
-            "taxId": ["tax", "ein", "ssn", "taxid", "tax_id", "tax_identification", "tin"],
-            "loanAmount": ["loan", "amount", "loanamount", "loan_amount", "principal", "credit"],
-            "revenue": ["revenue", "sales", "income", "annual_revenue", "turnover", "earnings"],
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.direct_matches = {
+            'email': ['email', 'e-mail', 'mail'],
+            'phone': ['phone', 'phone1', 'phone2', 'mobile', 'cell', 'telephone'],
+            'firstname': ['firstname', 'first name', 'first_name', 'fname'],
+            'lastname': ['lastname', 'last name', 'last_name', 'lname'],
+            'companyname': ['companyname', 'company name', 'company_name', 'company'],
+            'revenue': ['revenue', 'annual revenue', 'yearly revenue'],
+            'dnc': ['dnc', 'do not call', 'do_not_call']
         }
-        
-        all_patterns = []
-        for patterns_list in self.field_patterns.values():
-            all_patterns.extend(patterns_list)
-        
-        self.vectorizer = TfidfVectorizer(
-            analyzer='char',
-            ngram_range=(2, 4),
-            lowercase=True
-        )
-        self.vectorizer.fit(all_patterns)
     
+    def map_fields(self, headers: List[str], sample_data: List[Dict] = None) -> Dict[str, str]:
+        """Map CSV headers to internal field names using NLP and direct matching."""
+        mapping = {}
+        header_embeddings = self.model.encode(headers)
+        
+        # First try direct matches
+        for internal_field, possible_names in self.direct_matches.items():
+            for header in headers:
+                header_lower = header.lower()
+                if any(name in header_lower for name in possible_names):
+                    mapping[internal_field] = header
+                    break
+        
+        # For remaining fields, use NLP similarity
+        for i, header in enumerate(headers):
+            if header in mapping.values():
+                continue
+                
+            header_embedding = header_embeddings[i]
+            best_match = None
+            best_score = 0.45  # Lowered threshold for better matching
+            
+            for internal_field in ['email', 'phone', 'firstname', 'lastname', 'companyname', 'revenue', 'dnc']:
+                if internal_field in mapping:
+                    continue
+                    
+                field_embedding = self.model.encode(internal_field)[0]
+                similarity = cosine_similarity([header_embedding], [field_embedding])[0][0]
+                
+                if similarity > best_score:
+                    best_score = similarity
+                    best_match = internal_field
+            
+            if best_match:
+                mapping[best_match] = header
+        
+        # Special handling for phone fields - ensure we get the actual phone number
+        if 'phone' not in mapping:
+            for header in headers:
+                if header.lower().startswith('phone'):
+                    mapping['phone'] = header
+                    break
+        
+        # If we have a phonetype field but no phone field, try to find a phone field
+        if 'phonetype' in mapping and 'phone' not in mapping:
+            for header in headers:
+                if header.lower().startswith('phone'):
+                    mapping['phone'] = header
+                    break
+        
+        return mapping
+    
+    def _fallback_map_fields(self, headers: List[str], sample_data: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+        """Fallback to basic TF-IDF based mapping if NLP fails."""
+        mappings = []
+        for header in headers:
+            best_field = ""
+            best_score = 0.0
+            
+            # Check for DNC columns first
+            if any(pattern in header.lower() for pattern in [
+                "dnc", "do not call", "do_not_call", "dnc_flag", "call status"
+            ]):
+                mappings.append({
+                    "sourceField": header,
+                    "targetField": "dnc",
+                    "confidence": 1.0,
+                    "isRequired": False
+                })
+                continue
+            
+            # Use TF-IDF for other fields
+            for field_name, patterns in self.field_patterns.items():
+                similarity = self._calculate_similarity(header, patterns)
+                if similarity > best_score:
+                    best_score = similarity
+                    best_field = field_name
+            
+            if sample_data and len(sample_data) > 0:
+                sample_values = [row.get(header) for row in sample_data if header in row]
+                if sample_values:
+                    data_analysis = self._analyze_sample_data(header, sample_values)
+                    for field, confidence in data_analysis.items():
+                        if confidence > 0.8 and confidence > best_score:
+                            best_field = field
+                            best_score = confidence
+                        elif confidence > best_score:
+                            best_score = (best_score + confidence) / 2
+
+            mappings.append({
+                "sourceField": header,
+                "targetField": best_field if best_score > 0.3 else "",
+                "confidence": round(best_score, 2),
+                "isRequired": best_field in ["email", "firstname", "lastname"]
+            })
+        
+        return mappings
+
     def _calculate_similarity(self, source: str, target_patterns: List[str]) -> float:
         source_clean = re.sub(r'[^a-zA-Z0-9]', '', source.lower())
         max_similarity = 0
@@ -97,39 +223,6 @@ class NLPFieldMapper:
         
         return analysis
 
-    def map_fields(self, headers: List[str], sample_data: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
-        mappings = []
-        for header in headers:
-            best_field = ""
-            best_score = 0.0
-            
-            for field_name, patterns in self.field_patterns.items():
-                similarity = self._calculate_similarity(header, patterns)
-                if similarity > best_score:
-                    best_score = similarity
-                    best_field = field_name
-            
-            if sample_data and len(sample_data) > 0:
-                sample_values_for_header = [row.get(header) for row in sample_data if header in row and row.get(header) is not None]
-                if sample_values_for_header:
-                    data_analysis = self._analyze_sample_data(header, sample_values_for_header)
-                    for field, confidence in data_analysis.items():
-                        # Prioritize data-driven hints if strong
-                        if confidence > 0.8 and confidence > best_score : # If data strongly suggests a type
-                             best_field = field
-                             best_score = confidence # Use data confidence
-                        elif confidence > best_score: # Slight boost if consistent
-                             best_score = (best_score + confidence) / 2
-
-
-            mappings.append({
-                "sourceField": header,
-                "targetField": best_field if best_score > 0.3 else "",
-                "confidence": round(best_score, 2),
-                "isRequired": best_field in ["firstName", "lastName", "email"]
-            })
-        return mappings
-
 def handle_check_duplicates(request: DuplicateCheckRequest, db: SupabaseClient) -> Dict[str, Any]:
     logger.info(f"Checking duplicates for {len(request.data)} records, fields: {request.checkFields}")
     duplicate_checks_results = []
@@ -171,206 +264,245 @@ def handle_check_duplicates(request: DuplicateCheckRequest, db: SupabaseClient) 
         "totalDuplicates": total_duplicates_found
     }
 
-def handle_auto_mapping(request: AutoMappingRequest, nlp_mapper: NLPFieldMapper) -> Dict[str, Any]:
-    logger.info(f"Performing auto mapping for {len(request.headers)} headers")
-    mappings = nlp_mapper.map_fields(request.headers, request.sampleData)
-    return {
-        "mappings": mappings,
-        "totalMapped": len([m for m in mappings if m["targetField"]])
-    }
-
-def handle_process_leads(request: ProcessLeadsRequest, db: SupabaseClient, data_processor: DataProcessor) -> Dict[str, Any]:
-    logger.info(f"Processing {len(request.data)} leads")
-
-    filename = request.taggingSettings.get("fileName", "uploaded_file")
-
-    # Check if a batch with the same filename already exists and is completed
+def handle_auto_mapping(request: AutoMappingRequest, nlp_mapper: NLPFieldMapper) -> Dict:
+    """Handle the auto mapping request."""
     try:
-        existing_batches = db.get_upload_batches(status="Completed")
-        for batch in existing_batches:
-            if batch.get("filename") == filename:
-                logger.warning(f"Duplicate file upload detected: {filename}")
-                return {
-                    "success": False,
-                    "message": f"File '{filename}' has already been uploaded and processed.",
-                    "totalLeads": len(request.data),
-                    "validLeads": 0,
-                    "importedLeads": 0,
-                    "duplicateLeads": 0,
-                    "dncLeads": 0,
-                    "newDncEntriesAdded": 0,
-                    "failedLeads": len(request.data)
-                }
+        logger.info(f"Performing auto mapping for {len(request.headers)} headers")
+        
+        # Get mappings using NLP
+        mapping_dict = nlp_mapper.map_fields(request.headers, request.sampleData)
+        
+        # Convert mapping dictionary to the expected format
+        mappings = []
+        for source_field in request.headers:
+            target_field = None
+            confidence = 0.0
+            
+            # Find if this source field is mapped to any target
+            for target, source in mapping_dict.items():
+                if source == source_field:
+                    target_field = target
+                    confidence = 1.0  # Direct match has full confidence
+                    break
+            
+            mappings.append({
+                "sourceField": source_field,
+                "targetField": target_field,
+                "confidence": confidence,
+                "isRequired": target_field in ["email", "firstname", "lastname"] if target_field else False
+            })
+        
+        return {
+            "success": True,
+            "mappings": mappings,
+            "totalFields": len(request.headers),
+            "totalMapped": len([m for m in mappings if m["targetField"]])
+        }
+        
     except Exception as e:
-        logger.error(f"Error checking for duplicate files: {e}")
-        pass
+        logger.error(f"Error in handle_auto_mapping: {e}")
+        raise
 
-    # Create a mapping from source fields to target fields
-    field_mapping = {mapping["sourceField"]: mapping["targetField"] for mapping in request.mappings}
-    
-    # Re-implement the initial mapping loop to ensure correct data transfer based on mappings
-    mapped_data = []
-    for row_idx, row_data in enumerate(request.data):
-        mapped_row = {"original_row_index": row_idx}
+@router.post("/process-leads")
+async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
+    """Process uploaded leads."""
+    try:
+        # Create mapping dictionary
+        mapping = {m["sourceField"]: m["targetField"] for m in request.mappings}
+        logger.info(f"Field mapping: {mapping}")
         
-        # Apply all mapping rules to the current row
-        for source_field, target_field in field_mapping.items():
-            if source_field in row_data:
-                value = row_data[source_field]
-                # Skip empty values or 'N' values
-                if value and value != 'N':
-                    mapped_row[target_field] = value
+        # Get headers from first row of data
+        headers = list(request.data[0].keys()) if request.data else []
+        logger.info(f"Headers from data: {headers}")
         
-        # Ensure 'dnc' field exists in mapped_row, even if no mapping or data, default to None
-        if "dnc" not in mapped_row:
-            mapped_row["dnc"] = None
-
-        mapped_data.append(mapped_row)
-
-    logger.info(f"Mapped data sample (first 5, after corrected mapping): {mapped_data[:5]}")
-
-    # Clean and normalize data
-    cleaned_data = data_processor.clean_and_normalize_leads(
-        mapped_data,
-        request.cleaningSettings, 
-        request.normalizationSettings
-    )
-    
-    logger.info(f"Cleaned data sample (first 5): {cleaned_data[:5]}")
-
-    # Process DNC status
-    dnc_count = 0
-    dnc_entries_to_add = []
-    email_field = None
-    phone_field = None
-    
-    # Find the mapped target fields for email and phone
-    for mapping_rule in request.mappings:
-        if mapping_rule.get("targetField") == "email":
-            email_field = mapping_rule.get("sourceField")
-        elif mapping_rule.get("targetField") == "phone":
-            phone_field = mapping_rule.get("sourceField")
-            
-    # Find or create the 'Uploaded DNC' list ID
-    uploaded_dnc_list_id = db.get_or_create_dnc_list("Uploaded DNC", "manual")
-    
-    for row in cleaned_data:
-        # Check if the row has a DNC flag and is not already marked DNC from database check
-        is_dnc_flag = row.get("dnc")
+        # Initialize data processor
+        data_processor = DataProcessor()
         
-        # Remove the original 'dnc' key if it exists to prevent DB insertion errors
-        if "dnc" in row:
-            del row["dnc"]
+        # Extract data from uploaded leads
+        data = []
+        for row in request.data:
+            mapped_row = {}
+            for source_field, target_field in mapping.items():
+                if source_field in row and target_field:
+                    # Special handling for revenue field
+                    if target_field == 'revenue':
+                        value = row[source_field]
+                        if isinstance(value, (int, float)):
+                            mapped_row[target_field] = value
+                        elif isinstance(value, str):
+                            # Try to convert string to number
+                            try:
+                                # Remove any currency symbols and commas
+                                clean_value = value.replace('$', '').replace(',', '').strip()
+                                mapped_row[target_field] = float(clean_value)
+                            except (ValueError, TypeError):
+                                mapped_row[target_field] = 0
+                        else:
+                            mapped_row[target_field] = 0
+                    else:
+                        mapped_row[target_field] = row[source_field]
+            data.append(mapped_row)
+        
+        # Clean and normalize the data
+        cleaned_data = await data_processor.clean_and_normalize_leads(
+            data,
+            cleaning_settings=request.cleaningSettings,
+            normalization_settings=request.normalizationSettings
+        )
+        # Ensure cleaned_data is a list
+        if isinstance(cleaned_data, tuple):
+            cleaned_data = cleaned_data[0]
+        logger.info(f"Cleaned data sample: {cleaned_data[:5]}")
+        
+        # Initialize database client
+        db = SupabaseClient()
+        
+        # Check for duplicates
+        logger.info("Checking for duplicates")
+        seen_emails = set()
+        seen_phones = set()
+        unique_leads = []
+        duplicates = []
+        
+        # First check for duplicates within the current batch
+        for lead in cleaned_data:
+            email = lead.get('email', '').lower()
+            phone = lead.get('phone', '')
             
-        if is_dnc_flag is True:
-            row["leadstatus"] = "DNC"
-            dnc_count += 1
+            if email in seen_emails or phone in seen_phones:
+                duplicates.append(lead)
+                continue
+                
+            seen_emails.add(email)
+            seen_phones.add(phone)
+            unique_leads.append(lead)
+        
+        # Then check against existing leads in database
+        if unique_leads:
+            existing_emails = [lead.get('email', '').lower() for lead in unique_leads]
+            existing_phones = [lead.get('phone', '') for lead in unique_leads]
             
-            # Collect DNC entries for bulk insertion
-            if email_field and row.get(email_field):
-                dnc_entries_to_add.append({
-                    "value": str(row.get(email_field)).strip(),
-                    "valuetype": "email",
-                    "dnclistid": uploaded_dnc_list_id,
-                    "source": request.taggingSettings.get("fileName", "file_upload"),
-                    "createdat": datetime.now().isoformat()
-                })
-            if phone_field and row.get(phone_field):
-                 dnc_entries_to_add.append({
-                    "value": str(row.get(phone_field)).strip(),
-                    "valuetype": "phone",
-                    "dnclistid": uploaded_dnc_list_id,
-                    "source": request.taggingSettings.get("fileName", "file_upload"),
-                    "createdat": datetime.now().isoformat()
-                })
+            # Get existing leads by email and phone
+            email_duplicates = db.get_leads_by_emails(existing_emails)
+            phone_duplicates = db.get_leads_by_phones(existing_phones)
+            
+            # Create sets of existing emails and phones for faster lookup
+            existing_email_set = {lead['email'].lower() for lead in email_duplicates}
+            existing_phone_set = {lead['phone'] for lead in phone_duplicates}
+            
+            # Filter out duplicates
+            final_leads = []
+            for lead in unique_leads:
+                email = lead.get('email', '').lower()
+                phone = lead.get('phone', '')
+                
+                if email in existing_email_set or phone in existing_phone_set:
+                    duplicates.append(lead)
+                else:
+                    # Prepare lead data according to schema
+                    final_lead = {
+                        'email': lead.get('email'),
+                        'firstname': lead.get('firstname'),
+                        'lastname': lead.get('lastname'),
+                        'phone': lead.get('phone'),
+                        'companyname': lead.get('companyname'),
+                        'leadsource': 'file_upload',
+                        'leadstatus': 'new',
+                        'leadscore': 0,
+                        'leadcost': 0,
+                        'exclusivity': False,
+                        'tags': [],
+                        'createdat': datetime.now(timezone.utc).isoformat(),
+                        'metadata': {
+                            'revenue': lead.get('revenue', 0)
+                        }
+                    }
+                    final_leads.append(final_lead)
         else:
-            row["leadstatus"] = "New"
-
-    # Filter valid records (must have email or phone)
-    valid_data = [row for row in cleaned_data if row.get("email") or row.get("phone")]
-    
-    # Remove duplicates if enabled
-    if request.cleaningSettings.get("removeDuplicates", True):
-        valid_data = data_processor.remove_duplicates(valid_data)
+            final_leads = []
         
-    # Map processed data keys to database column names
-    db_ready_data = []
-    # Define a mapping from our internal/NLP keys to database column names
-    db_column_mapping = {
-        "firstName": "firstname",
-        "lastName": "lastname",
-        "email": "email",
-        "phone": "phone",
-        "companyname": "companyname",
-        "taxId": "taxid",
-        "address": "address",
-        "city": "city",
-        "state": "state",
-        "zipCode": "zipcode",
-        "country": "country",
-        "loanAmount": "loanamount",
-        "revenue": "revenue",
-        "leadstatus": "leadstatus",
-        "tags": "tags"
-    }
-
-    current_time_iso = datetime.now().isoformat()
-
-    for row in valid_data:
-        db_row = {}
-        # Build db_row explicitly using the mapping to ensure only valid columns are included
-        for internal_key, db_column in db_column_mapping.items():
-            if internal_key in row and row[internal_key] not in [None, 'N', '']:
-                db_row[db_column] = row[internal_key]
-
-        # Add required metadata fields directly
-        db_row["createdat"] = current_time_iso
-        db_row["updatedat"] = current_time_iso
-        db_row["leadsource"] = "File Upload"
-
-        db_ready_data.append(db_row)
-
-    # Add DNC entries to the global list in bulk
-    new_dnc_entries_added = 0
-    if dnc_entries_to_add:
+        # Collect DNC entries
+        dnc_entries = []
+        for lead in final_leads:
+            if lead.get('dnc', '').upper() == 'Y':
+                # First ensure we have a default DNC list
+                dnc_list = db.get_or_create_dnc_list("Default DNC List", "email")
+                
+                dnc_entry = {
+                    'value': lead.get('email', ''),
+                    'valuetype': 'email',
+                    'source': 'upload',
+                    'reason': 'User marked as DNC',
+                    'dnclistid': dnc_list['id'],
+                    'createdat': datetime.now(timezone.utc).isoformat()
+                }
+                dnc_entries.append(dnc_entry)
+                
+                if lead.get('phone'):
+                    phone_dnc = {
+                        'value': lead.get('phone', ''),
+                        'valuetype': 'phone',
+                        'source': 'upload',
+                        'reason': 'User marked as DNC',
+                        'dnclistid': dnc_list['id'],
+                        'createdat': datetime.now(timezone.utc).isoformat()
+                    }
+                    dnc_entries.append(phone_dnc)
+        
+        # Insert leads
+        inserted_leads = []
+        if final_leads:
+            try:
+                result = db.insert_leads(final_leads)
+                inserted_leads = result.get('data', [])
+                logger.info(f"Successfully inserted {len(inserted_leads)} leads")
+            except Exception as e:
+                logger.error(f"Error inserting leads: {e}")
+                raise
+        
+        # Add DNC entries
+        if dnc_entries:
+            try:
+                db.add_dnc_entries(dnc_entries)
+                logger.info(f"Added {len(dnc_entries)} DNC entries")
+            except Exception as e:
+                logger.error(f"Error adding DNC entries: {e}")
+                # Don't raise here, as leads were already inserted
+        
+        # Create batch record
+        batch_record = {
+            'filename': request.filename or 'unknown_file.csv',  # Use provided filename or default
+            'filetype': 'csv',
+            'status': 'completed',
+            'totalleads': len(cleaned_data),
+            'cleanedleads': len(unique_leads),
+            'duplicateleads': len(duplicates),
+            'dncmatches': len(dnc_entries),
+            'originalheaders': headers,
+            'mappingrules': request.mappings,
+            'createdat': datetime.now(timezone.utc).isoformat(),
+            'completedat': datetime.now(timezone.utc).isoformat()
+        }
+        
         try:
-            new_dnc_entries_added = db.add_dnc_entries_bulk(dnc_entries_to_add)
-            logger.info(f"Added {new_dnc_entries_added} new DNC entries to the global list.")
+            db.insert_batch_record(batch_record)
+            logger.info("Created batch record")
         except Exception as e:
-            logger.error(f"Failed to add DNC entries in bulk: {e}")
-
-    # Insert into database
-    inserted_count = 0
-    if db_ready_data:
-        inserted_count = db.insert_leads_batch(db_ready_data)
-
-    duplicates_removed_count = len(request.data) - len(valid_data)
-
-    # Create upload batch record
-    batch_record = {
-        "filename": request.taggingSettings.get("fileName", "processed_leads.csv"),
-        "filetype": request.taggingSettings.get("fileType", "csv"),
-        "status": "Completed" if inserted_count == len(valid_data) else "Partial",
-        "totalleads": len(request.data),
-        "validleads": len(valid_data),
-        "importedleads": inserted_count,
-        "duplicateleads": duplicates_removed_count,
-        "dncmatches": dnc_count,
-        "processingprogress": 100,
-        "createdat": current_time_iso,
-        "completedat": current_time_iso
-    }
-    
-    batch_id = db.create_upload_batch(batch_record)
-    
-    return {
-        "success": True,
-        "batchId": batch_id,
-        "totalLeads": len(request.data),
-        "validLeads": len(valid_data),
-        "importedLeads": inserted_count,
-        "duplicateLeads": duplicates_removed_count,
-        "dncLeads": dnc_count,
-        "newDncEntriesAdded": new_dnc_entries_added,
-        "failedLeads": len(valid_data) - inserted_count
-    }
+            logger.error(f"Error creating batch record: {e}")
+            # Don't raise here, as leads were already inserted
+        
+        return {
+            'success': True,
+            'message': 'Leads processed successfully',
+            'stats': {
+                'total': len(cleaned_data),
+                'cleaned': len(unique_leads),
+                'duplicates': len(duplicates),
+                'dnc': len(dnc_entries),
+                'inserted': len(inserted_leads)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing leads: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

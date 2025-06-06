@@ -45,7 +45,7 @@ from utils.notification_service import NotificationService
 from utils.audit_logger import AuditLogger
 from utils.lead_enrichment import LeadEnrichmentService
 # Import from the new upload_file module
-from upload_file import NLPFieldMapper, handle_check_duplicates, handle_auto_mapping, handle_process_leads
+from upload_file import NLPFieldMapper, handle_check_duplicates, handle_auto_mapping, handle_process_leads, router as upload_router
 
 # Load environment variables from .env file
 load_dotenv()
@@ -62,10 +62,10 @@ app = FastAPI(title="Lead Management API")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["*"],  # Allows all origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
 # Initialize services
@@ -170,7 +170,7 @@ async def get_current_user(
 
 @app.get("/")
 async def root():
-    return {"message": "Lead Management API is running"}
+    return {"message": "Lead Management System API"}
 
 # Lead Processing Endpoints - now delegate to upload_file.py
 @app.post("/check-duplicates")
@@ -198,23 +198,12 @@ async def auto_mapping_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/process-leads")
-async def process_leads_endpoint(
-    request: ProcessLeadsRequest, 
-    current_user: Dict = Depends(get_current_user)
-):
+async def process_leads_endpoint(request: ProcessLeadsRequest):
+    """Process leads with the given mapping rules."""
     try:
-        # Pass db and data_processor instances
-        # Add user info to request.taggingSettings if needed for audit or record ownership
-        if "fileName" not in request.taggingSettings: # Ensure fileName is robustly handled
-             request.taggingSettings["fileName"] = "UploadedFile" # Default
-        if "fileType" not in request.taggingSettings:
-             request.taggingSettings["fileType"] = "unknown"
-
-        # request.taggingSettings["userId"] = current_user["id"] # Example of passing user context
-
-        return handle_process_leads(request, db, data_processor)
+        return await handle_process_leads(request)
     except Exception as e:
-        logger.error(f"Error in /process-leads endpoint: {str(e)}", exc_info=True)
+        logger.error(f"Error in /process-leads endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -314,6 +303,9 @@ async def get_recent_uploads(
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+# Include routers
+app.include_router(upload_router, prefix="/api")
 
 # Ensure uvicorn run is guarded for module execution
 if __name__ == "__main__":

@@ -87,9 +87,49 @@ class DataProcessor:
             "flagMissingFields": True,
             "compressFiles": True,
             "enrichData": False,
+            "emailTypoCorrections": "gmial.com=gmail.com\nyaho.com=yahoo.com\nhotmial.com=hotmail.com"
         }
+        
+        # Normalization options with defaults
+        self.default_normalization_options = {
+            "nameFormat": "proper",  # proper, upper, lower, preserve
+            "phoneFormat": "standard",  # standard, dashes, dots, international, raw
+            "emailFormat": "lowercase",  # lowercase, preserve
+            "addressFormat": "standard",  # standard, proper, upper, lower, preserve
+            "dedupeStrategy": "email_phone",  # email, phone, email_phone, email_and_phone, custom
+            "customDedupeFields": "",
+            "enableEnrichment": False,
+            "enrichmentProvider": "",
+            "enrichmentApiKey": ""
+        }
+        
+        # Initialize email typo corrections dictionary
+        self.email_typo_corrections = self._parse_email_typo_corrections(self.default_cleaning_options["emailTypoCorrections"])
     
-    def clean_and_normalize_leads(self, data: List[Dict], cleaning_settings: Dict, normalization_settings: Dict) -> List[Dict]:
+    def _parse_email_typo_corrections(self, corrections_str: str) -> Dict[str, str]:
+        """Parse email typo corrections from string format."""
+        corrections = {}
+        for line in corrections_str.strip().split('\n'):
+            if '=' in line:
+                typo, correction = line.strip().split('=')
+                corrections[typo.lower()] = correction.lower()
+        return corrections
+    
+    def _correct_email_typos(self, email: str) -> str:
+        """Correct common email typos."""
+        if not email or '@' not in email:
+            return email
+            
+        local_part, domain = email.split('@')
+        domain = domain.lower()
+        
+        # Check if domain has a typo
+        if domain in self.email_typo_corrections:
+            return f"{local_part}@{self.email_typo_corrections[domain]}"
+        
+        return email
+    
+    async def clean_and_normalize_leads(self, data: List[Dict], cleaning_settings: Dict, normalization_settings: Dict) -> List[Dict]:
         """
         Clean and normalize lead data based on settings.
         
@@ -103,46 +143,161 @@ class DataProcessor:
         """
         logger.info(f"Cleaning and normalizing {len(data)} leads")
         
-        cleaned_data = []
+        # Merge settings with defaults
+        cleaning_opts = {**self.default_cleaning_options, **cleaning_settings}
+        norm_opts = {**self.default_normalization_options, **normalization_settings}
         
-        for row in data:
-            cleaned_row = {}
+        # Update email typo corrections if provided
+        if "emailTypoCorrections" in cleaning_settings:
+            self.email_typo_corrections = self._parse_email_typo_corrections(cleaning_settings["emailTypoCorrections"])
+        
+        cleaned_data = []
+        for lead in data:
+            cleaned_lead = lead.copy()
             
-            for field, value in row.items():
-                if value is None or value == "":
-                    cleaned_row[field] = None
-                    continue
-                
-                # Convert to string for processing
-                str_value = str(value).strip() if cleaning_settings.get("trimWhitespace", True) else str(value)
-                
-                # Apply field-specific cleaning and normalization
-                if field == "email":
-                    cleaned_value = self._clean_email(str_value, cleaning_settings, normalization_settings)
-                elif field == "phone":
-                    cleaned_value = self._clean_phone(str_value, cleaning_settings, normalization_settings)
-                elif field in ["firstName", "lastName"]:
-                    cleaned_value = self._clean_name(str_value, cleaning_settings, normalization_settings)
-                elif field == "companyName":
-                    cleaned_value = self._clean_company_name(str_value, cleaning_settings, normalization_settings)
-                elif field in ["address", "city", "state", "country"]:
-                    cleaned_value = self._clean_address_field(str_value, cleaning_settings, normalization_settings)
-                elif field in ["loanAmount", "revenue"]:
-                    cleaned_value = self._clean_numeric_field(str_value, cleaning_settings, normalization_settings)
-                else:
-                    cleaned_value = str_value
-                
-                cleaned_row[field] = cleaned_value
+            # Apply cleaning settings
+            if cleaning_opts["trimWhitespace"]:
+                for key, value in cleaned_lead.items():
+                    if isinstance(value, str):
+                        cleaned_lead[key] = value.strip()
             
-            # Add validation flags
-            if cleaning_settings.get("flagMissingFields", True):
-                essential_fields = ["firstName", "lastName", "email", "phone"]
-                missing_count = sum(1 for field in essential_fields if not cleaned_row.get(field))
-                cleaned_row["missingEssentialFields"] = missing_count > 0
+            if cleaning_opts["normalizeCase"]:
+                # Normalize email to lowercase
+                if "email" in cleaned_lead and cleaned_lead["email"]:
+                    cleaned_lead["email"] = cleaned_lead["email"].lower()
+                
+                # Normalize names based on format
+                if norm_opts["nameFormat"] == "proper":
+                    if "firstname" in cleaned_lead and cleaned_lead["firstname"]:
+                        cleaned_lead["firstname"] = cleaned_lead["firstname"].title()
+                    if "lastname" in cleaned_lead and cleaned_lead["lastname"]:
+                        cleaned_lead["lastname"] = cleaned_lead["lastname"].title()
+                elif norm_opts["nameFormat"] == "upper":
+                    if "firstname" in cleaned_lead and cleaned_lead["firstname"]:
+                        cleaned_lead["firstname"] = cleaned_lead["firstname"].upper()
+                    if "lastname" in cleaned_lead and cleaned_lead["lastname"]:
+                        cleaned_lead["lastname"] = cleaned_lead["lastname"].upper()
+                elif norm_opts["nameFormat"] == "lower":
+                    if "firstname" in cleaned_lead and cleaned_lead["firstname"]:
+                        cleaned_lead["firstname"] = cleaned_lead["firstname"].lower()
+                    if "lastname" in cleaned_lead and cleaned_lead["lastname"]:
+                        cleaned_lead["lastname"] = cleaned_lead["lastname"].lower()
             
-            cleaned_data.append(cleaned_row)
+            # Format phone number
+            if "phone" in cleaned_lead and cleaned_lead["phone"]:
+                phone = str(cleaned_lead["phone"]).strip()
+                # Remove any non-digit characters
+                phone = ''.join(filter(str.isdigit, phone))
+                
+                if len(phone) == 10:  # US phone number
+                    if norm_opts["phoneFormat"] == "standard":
+                        cleaned_lead["phone"] = f"({phone[:3]}) {phone[3:6]}-{phone[6:]}"
+                    elif norm_opts["phoneFormat"] == "dashes":
+                        cleaned_lead["phone"] = f"{phone[:3]}-{phone[3:6]}-{phone[6:]}"
+                    elif norm_opts["phoneFormat"] == "dots":
+                        cleaned_lead["phone"] = f"{phone[:3]}.{phone[3:6]}.{phone[6:]}"
+                    elif norm_opts["phoneFormat"] == "international":
+                        cleaned_lead["phone"] = f"+1 {phone[:3]} {phone[3:6]} {phone[6:]}"
+                    # For "raw" format, keep as is
+            
+            # Format email and correct typos
+            if "email" in cleaned_lead and cleaned_lead["email"]:
+                if norm_opts["emailFormat"] == "lowercase":
+                    cleaned_lead["email"] = cleaned_lead["email"].lower()
+                if cleaning_opts["correctCommonTypos"]:
+                    cleaned_lead["email"] = self._correct_email_typos(cleaned_lead["email"])
+            
+            # Format address
+            if "address" in cleaned_lead and cleaned_lead["address"]:
+                if norm_opts["addressFormat"] == "proper":
+                    cleaned_lead["address"] = cleaned_lead["address"].title()
+                elif norm_opts["addressFormat"] == "upper":
+                    cleaned_lead["address"] = cleaned_lead["address"].upper()
+                elif norm_opts["addressFormat"] == "lower":
+                    cleaned_lead["address"] = cleaned_lead["address"].lower()
+            
+            # Validate email if enabled
+            if cleaning_opts["validateEmail"] and "email" in cleaned_lead:
+                if not self._is_valid_email(cleaned_lead["email"]):
+                    cleaned_lead["missingEssentialFields"] = True
+            
+            # Validate phone if enabled
+            if cleaning_opts["validatePhone"] and "phone" in cleaned_lead:
+                if not self._is_valid_phone(cleaned_lead["phone"]):
+                    cleaned_lead["missingEssentialFields"] = True
+            
+            cleaned_data.append(cleaned_lead)
+        
+        # Handle deduplication
+        if cleaning_opts["removeDuplicates"]:
+            cleaned_data = self._remove_duplicates(cleaned_data, norm_opts["dedupeStrategy"], norm_opts["customDedupeFields"])
+        
+        # Apply data enrichment if enabled
+        if norm_opts["enableEnrichment"]:
+            cleaned_data = await self._enrich_data(
+                cleaned_data,
+                norm_opts["enrichmentProvider"],
+                norm_opts["enrichmentApiKey"]
+            )
         
         return cleaned_data
+    
+    def _is_valid_email(self, email: str) -> bool:
+        """Validate email format."""
+        if not email:
+            return False
+        import re
+        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        return bool(re.match(pattern, email))
+    
+    def _is_valid_phone(self, phone: str) -> bool:
+        """Validate phone number format."""
+        if not phone:
+            return False
+        # Remove any non-digit characters
+        digits = ''.join(filter(str.isdigit, str(phone)))
+        return len(digits) >= 10
+    
+    def _remove_duplicates(self, data: List[Dict], strategy: str, custom_fields: str = "") -> List[Dict]:
+        """Remove duplicate leads based on the specified strategy."""
+        if not data:
+            return data
+        
+        seen = set()
+        unique_data = []
+        
+        for lead in data:
+            # Create a key based on the deduplication strategy
+            if strategy == "email":
+                key = lead.get("email", "").lower()
+            elif strategy == "phone":
+                key = ''.join(filter(str.isdigit, str(lead.get("phone", ""))))
+            elif strategy == "email_phone":
+                email = lead.get("email", "").lower()
+                phone = ''.join(filter(str.isdigit, str(lead.get("phone", ""))))
+                key = f"{email}|{phone}"
+            elif strategy == "email_and_phone":
+                email = lead.get("email", "").lower()
+                phone = ''.join(filter(str.isdigit, str(lead.get("phone", ""))))
+                if email and phone:  # Only consider if both exist
+                    key = f"{email}|{phone}"
+                else:
+                    key = None
+            elif strategy == "custom" and custom_fields:
+                fields = [f.strip() for f in custom_fields.split(",")]
+                values = []
+                for field in fields:
+                    value = str(lead.get(field, "")).lower()
+                    values.append(value)
+                key = "|".join(values)
+            else:
+                continue  # Skip if no valid strategy
+            
+            if key and key not in seen:
+                seen.add(key)
+                unique_data.append(lead)
+        
+        return unique_data
 
     def _clean_email(self, email: str, cleaning_settings: Dict, normalization_settings: Dict) -> Optional[str]:
         """Clean and normalize email address."""

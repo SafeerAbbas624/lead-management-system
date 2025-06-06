@@ -1,7 +1,7 @@
 import os
 import logging
 from typing import Dict, List, Optional, Any, Union
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from supabase import create_client, Client
 
@@ -17,23 +17,16 @@ class SupabaseClient:
         """
         Initialize the Supabase client.
         """
-        # Get Supabase credentials from environment variables
-        self.supabase_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-        self.supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        
-        if not self.supabase_url or not self.supabase_key:
-            logger.warning("Supabase credentials not found. Using mock data.")
-            self.client = None
-            self.use_mock = True
-        else:
-            try:
-                self.client: Client = create_client(self.supabase_url, self.supabase_key)
-                self.use_mock = False
-                logger.info("Supabase client initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize Supabase client: {str(e)}")
-                self.client = None
-                self.use_mock = True
+        try:
+            # Initialize Supabase client
+            self.supabase = create_client(
+                os.getenv("NEXT_PUBLIC_SUPABASE_URL", ""),
+                os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+            )
+            logger.info("Supabase client initialized successfully")
+        except Exception as e:
+            logger.warning(f"Supabase credentials not found. Using mock data.")
+            self.supabase = None
     
     # Upload Batch methods
     def get_upload_batch(self, batch_id: int) -> Dict[str, Any]:
@@ -46,12 +39,12 @@ class SupabaseClient:
         Returns:
             Upload batch data
         """
-        if self.use_mock:
-            # Return mock data
+        if self.supabase is None:
+            logger.warning("No Supabase client available. Returning mock data.")
             return self._get_mock_upload_batch(batch_id)
         
         try:
-            response = self.client.table("upload_batches").select("*").eq("id", batch_id).execute()
+            response = self.supabase.table("upload_batches").select("*").eq("id", batch_id).execute()
             
             if not response.data:
                 raise ValueError(f"Upload batch with ID {batch_id} not found")
@@ -63,13 +56,12 @@ class SupabaseClient:
     
     def create_upload_batch(self, batch_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new upload batch."""
-        if not self.client:
+        if self.supabase is None:
             logger.warning("No Supabase client available. Returning mock batch ID.")
-            self.use_mock = True
             return {**batch_data, "id": 1}
             
         try:
-            response = self.client.table("upload_batches").insert(batch_data).execute()
+            response = self.supabase.table("upload_batches").insert(batch_data).execute()
             
             if not response.data:
                 raise ValueError("Failed to create upload batch")
@@ -91,14 +83,14 @@ class SupabaseClient:
         Returns:
             Updated batch data
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._update_mock_batch_status(batch_id, status, **kwargs)
         
         try:
             update_data = {"status": status, **kwargs}
             
-            response = self.client.table("upload_batches").update(update_data).eq("id", batch_id).execute()
+            response = self.supabase.table("upload_batches").update(update_data).eq("id", batch_id).execute()
             
             if not response.data:
                 raise ValueError(f"Upload batch with ID {batch_id} not found")
@@ -119,12 +111,12 @@ class SupabaseClient:
         Returns:
             List of upload batches
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_upload_batches(limit, status)
         
         try:
-            query = self.client.table("upload_batches").select("*").order("createdat", desc=True).limit(limit)
+            query = self.supabase.table("upload_batches").select("*").order("createdat", desc=True).limit(limit)
             
             if status:
                 query = query.eq("status", status)
@@ -147,7 +139,7 @@ class SupabaseClient:
         Returns:
             Tuple of (is_dnc, dnc_lists)
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._check_mock_dnc(email, phone)
         
@@ -169,12 +161,12 @@ class SupabaseClient:
         Returns:
             Created DNC list
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return {**list_data, "id": 1}
         
         try:
-            response = self.client.table("dnc_lists").insert(list_data).execute()
+            response = self.supabase.table("dnc_lists").insert(list_data).execute()
             
             if not response.data:
                 raise ValueError("Failed to create DNC list")
@@ -194,12 +186,12 @@ class SupabaseClient:
         Returns:
             List of DNC lists
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_dnc_lists(active_only)
         
         try:
-            query = self.client.table("dnc_lists").select("*")
+            query = self.supabase.table("dnc_lists").select("*")
             
             if active_only:
                 query = query.eq("isactive", True)
@@ -221,7 +213,7 @@ class SupabaseClient:
         Returns:
             ID of the DNC list
         """
-        if self.use_mock:
+        if self.supabase is None:
             logger.warning("No Supabase client available. Returning mock DNC list ID.")
             # In mock mode, simulate creating/getting a list
             # A simple mock ID is sufficient for the flow
@@ -229,7 +221,7 @@ class SupabaseClient:
             
         try:
             # Try to get the list by name
-            response = self.client.table("dnc_lists").select("id").eq("name", name).limit(1).execute()
+            response = self.supabase.table("dnc_lists").select("id").eq("name", name).limit(1).execute()
             
             if response.data:
                 # List found, return its ID
@@ -244,7 +236,7 @@ class SupabaseClient:
                     "isactive": True,
                     "createdat": datetime.now().isoformat()
                 }
-                create_response = self.client.table("dnc_lists").insert(new_list_data).execute()
+                create_response = self.supabase.table("dnc_lists").insert(new_list_data).execute()
                 
                 if not create_response.data:
                     raise ValueError(f"Failed to create DNC list '{name}'")
@@ -266,12 +258,12 @@ class SupabaseClient:
         Returns:
             Created DNC entry
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return {**entry_data, "id": 1}
         
         try:
-            response = self.client.table("dnc_entries").insert(entry_data).execute()
+            response = self.supabase.table("dnc_entries").insert(entry_data).execute()
             
             if not response.data:
                 raise ValueError("Failed to add DNC entry")
@@ -293,12 +285,12 @@ class SupabaseClient:
         Returns:
             List of DNC entries
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_dnc_entries(list_id, limit, offset)
         
         try:
-            response = self.client.table("dnc_entries").select("*").eq("dnclistid", list_id).range(offset, offset + limit - 1).execute()
+            response = self.supabase.table("dnc_entries").select("*").eq("dnclistid", list_id).range(offset, offset + limit - 1).execute()
             return response.data or []
         except Exception as e:
             logger.error(f"Error getting DNC entries: {str(e)}")
@@ -314,12 +306,12 @@ class SupabaseClient:
         Returns:
             True if successful
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return True
         
         try:
-            response = self.client.table("dnc_entries").delete().eq("id", entry_id).execute()
+            response = self.supabase.table("dnc_entries").delete().eq("id", entry_id).execute()
             return bool(response.data)
         except Exception as e:
             logger.error(f"Error deleting DNC entry: {str(e)}")
@@ -335,7 +327,7 @@ class SupabaseClient:
         Returns:
             Number of entries added
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return len(entries)
         
@@ -346,7 +338,7 @@ class SupabaseClient:
             
             for i in range(0, len(entries), chunk_size):
                 chunk = entries[i:i+chunk_size]
-                response = self.client.table("dnc_entries").insert(chunk).execute()
+                response = self.supabase.table("dnc_entries").insert(chunk).execute()
                 added_count += len(response.data or [])
             
             return added_count
@@ -383,12 +375,12 @@ class SupabaseClient:
         Returns:
             List of leads
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_leads_by_batch(batch_id, limit, offset)
         
         try:
-            response = self.client.table("leads").select("*").eq("uploadbatchid", batch_id).range(offset, offset + limit - 1).execute()
+            response = self.supabase.table("leads").select("*").eq("uploadbatchid", batch_id).range(offset, offset + limit - 1).execute()
             return response.data or []
         except Exception as e:
             logger.error(f"Error getting leads by batch: {str(e)}")
@@ -396,10 +388,10 @@ class SupabaseClient:
     
     def get_leads(self, limit: int = 100, offset: int = 0, search: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get leads with optional search."""
-        if not self.client:
+        if self.supabase is None:
             raise ValueError("Supabase client not initialized")
             
-        query = self.client.table("leads").select("*").order("createdat", desc=True).limit(limit).offset(offset)
+        query = self.supabase.table("leads").select("*").order("createdat", desc=True).limit(limit).offset(offset)
         
         if search:
             query = query.or_(
@@ -412,12 +404,12 @@ class SupabaseClient:
     
     def update_lead_tags(self, lead_ids: List[int], tags: List[str]) -> int:
         """Update tags for multiple leads."""
-        if not self.client:
+        if self.supabase is None:
             raise ValueError("Supabase client not initialized")
             
         updated_count = 0
         for lead_id in lead_ids:
-            response = self.client.table("leads").update({"tags": tags}).eq("id", lead_id).execute()
+            response = self.supabase.table("leads").update({"tags": tags}).eq("id", lead_id).execute()
             if response.data:
                 updated_count += 1
         
@@ -434,12 +426,12 @@ class SupabaseClient:
         Returns:
             Updated lead data
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return {"id": lead_id, "revenue": revenue}
         
         try:
-            response = self.client.table("leads").update({"revenue": revenue, "updatedat": datetime.now().isoformat()}).eq("id", lead_id).execute()
+            response = self.supabase.table("leads").update({"revenue": revenue, "updatedat": datetime.now().isoformat()}).eq("id", lead_id).execute()
             
             if not response.data:
                 raise ValueError(f"Lead with ID {lead_id} not found")
@@ -461,12 +453,12 @@ class SupabaseClient:
         Returns:
             List of clients
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_clients(client_ids, active_only)
         
         try:
-            query = self.client.table("clients").select("*")
+            query = self.supabase.table("clients").select("*")
             
             if active_only:
                 query = query.eq("isactive", True)
@@ -482,10 +474,10 @@ class SupabaseClient:
     
     def create_client(self, client_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new client."""
-        if not self.client:
+        if self.supabase is None:
             raise ValueError("Supabase client not initialized")
             
-        response = self.client.table("clients").insert(client_data).execute()
+        response = self.supabase.table("clients").insert(client_data).execute()
         
         if not response.data:
             raise ValueError("Failed to create client")
@@ -502,12 +494,12 @@ class SupabaseClient:
         Returns:
             Created distribution record
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return {**distribution_data, "id": 1}
         
         try:
-            response = self.client.table("lead_distributions").insert(distribution_data).execute()
+            response = self.supabase.table("lead_distributions").insert(distribution_data).execute()
             
             if not response.data:
                 raise ValueError("Failed to create distribution record")
@@ -529,12 +521,12 @@ class SupabaseClient:
         Returns:
             List of distribution records
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_distributions(batch_id, client_id, limit)
         
         try:
-            query = self.client.table("lead_distributions").select("*").order("createdat", desc=True).limit(limit)
+            query = self.supabase.table("lead_distributions").select("*").order("createdat", desc=True).limit(limit)
             
             if batch_id:
                 query = query.eq("batchid", batch_id)
@@ -559,7 +551,7 @@ class SupabaseClient:
         Returns:
             Number of leads tagged
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return len(lead_ids)
         
@@ -572,7 +564,7 @@ class SupabaseClient:
                 chunk = lead_ids[i:i+chunk_size]
                 
                 # Get current tags for each lead
-                leads_response = self.client.table("leads").select("id, tags").in_("id", chunk).execute()
+                leads_response = self.supabase.table("leads").select("id, tags").in_("id", chunk).execute()
                 leads = leads_response.data or []
                 
                 # Update tags for each lead
@@ -584,7 +576,7 @@ class SupabaseClient:
                         current_tags.append(tag)
                         
                         # Update the lead
-                        update_response = self.client.table("leads").update({"tags": current_tags}).eq("id", lead_id).execute()
+                        update_response = self.supabase.table("leads").update({"tags": current_tags}).eq("id", lead_id).execute()
                         
                         if update_response.data:
                             tagged_count += 1
@@ -597,10 +589,10 @@ class SupabaseClient:
     # Supplier methods
     def get_suppliers(self, active_only: bool = True) -> List[Dict[str, Any]]:
         """Get all suppliers."""
-        if not self.client:
+        if self.supabase is None:
             raise ValueError("Supabase client not initialized")
             
-        query = self.client.table("suppliers").select("*")
+        query = self.supabase.table("suppliers").select("*")
         
         if active_only:
             query = query.eq("status", "Active")
@@ -611,10 +603,10 @@ class SupabaseClient:
     
     def create_supplier(self, supplier_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new supplier."""
-        if not self.client:
+        if self.supabase is None:
             raise ValueError("Supabase client not initialized")
             
-        response = self.client.table("suppliers").insert(supplier_data).execute()
+        response = self.supabase.table("suppliers").insert(supplier_data).execute()
         
         if not response.data:
             raise ValueError("Failed to create supplier")
@@ -638,13 +630,13 @@ class SupabaseClient:
         Returns:
             Dict with ROI metrics
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_roi_metrics()
         
         try:
             # Build the query
-            query = self.client.table("leads").select("leadcost, revenue, leadsource, supplierid, leadstatus")
+            query = self.supabase.table("leads").select("leadcost, revenue, leadsource, supplierid, leadstatus")
             
             if start_date:
                 query = query.gte("createdat", start_date)
@@ -727,13 +719,13 @@ class SupabaseClient:
         Returns:
             Dict with supplier performance metrics
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_supplier_performance()
         
         try:
             # Build the query
-            query = self.client.table("leads").select("leadcost, revenue, supplierid, leadstatus")
+            query = self.supabase.table("leads").select("leadcost, revenue, supplierid, leadstatus")
             
             if start_date:
                 query = query.gte("createdat", start_date)
@@ -746,7 +738,7 @@ class SupabaseClient:
             leads = response.data or []
             
             # Get supplier details
-            suppliers_response = self.client.table("suppliers").select("id, name").execute()
+            suppliers_response = self.supabase.table("suppliers").select("id, name").execute()
             suppliers = {supplier["id"]: supplier["name"] for supplier in suppliers_response.data or []}
             
             # Calculate metrics by supplier
@@ -807,12 +799,12 @@ class SupabaseClient:
         Returns:
             Created user
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return {**user_data, "id": 1}
         
         try:
-            response = self.client.table("users").insert(user_data).execute()
+            response = self.supabase.table("users").insert(user_data).execute()
             
             if not response.data:
                 raise ValueError("Failed to create user")
@@ -832,12 +824,12 @@ class SupabaseClient:
         Returns:
             List of users
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_users(role)
         
         try:
-            query = self.client.table("users").select("*")
+            query = self.supabase.table("users").select("*")
             
             if role:
                 query = query.eq("role", role)
@@ -858,12 +850,12 @@ class SupabaseClient:
         Returns:
             Created API key
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return {**api_key_data, "id": 1}
         
         try:
-            response = self.client.table("api_keys").insert(api_key_data).execute()
+            response = self.supabase.table("api_keys").insert(api_key_data).execute()
             
             if not response.data:
                 raise ValueError("Failed to create API key")
@@ -883,12 +875,12 @@ class SupabaseClient:
         Returns:
             List of API keys
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_api_keys(active_only)
         
         try:
-            query = self.client.table("api_keys").select("*")
+            query = self.supabase.table("api_keys").select("*")
             
             if active_only:
                 query = query.eq("isactive", True)
@@ -909,12 +901,12 @@ class SupabaseClient:
         Returns:
             Created activity log
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return {**activity_data, "id": 1}
         
         try:
-            response = self.client.table("activity_logs").insert(activity_data).execute()
+            response = self.supabase.table("activity_logs").insert(activity_data).execute()
             
             if not response.data:
                 raise ValueError("Failed to log activity")
@@ -935,12 +927,12 @@ class SupabaseClient:
         Returns:
             List of activity logs
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return self._get_mock_activity_logs(user_id, limit)
         
         try:
-            query = self.client.table("activity_logs").select("*").order("createdat", desc=True).limit(limit)
+            query = self.supabase.table("activity_logs").select("*").order("createdat", desc=True).limit(limit)
             
             if user_id:
                 query = query.eq("userid", user_id)
@@ -961,7 +953,7 @@ class SupabaseClient:
         Returns:
             File data as bytes
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return b"Mock file data"
         
@@ -971,7 +963,7 @@ class SupabaseClient:
             bucket = parts[0]
             path = parts[1] if len(parts) > 1 else file_path
             
-            response = self.client.storage.from_(bucket).download(path)
+            response = self.supabase.storage.from_(bucket).download(path)
             return response
         except Exception as e:
             logger.error(f"Error getting file from storage: {str(e)}")
@@ -989,15 +981,15 @@ class SupabaseClient:
         Returns:
             Public URL of the uploaded file
         """
-        if self.use_mock:
+        if self.supabase is None:
             # Return mock data
             return f"https://mock-storage.com/{bucket}/{path}"
         
         try:
-            response = self.client.storage.from_(bucket).upload(path, file_data)
+            response = self.supabase.storage.from_(bucket).upload(path, file_data)
             
             # Get the public URL
-            public_url = self.client.storage.from_(bucket).get_public_url(path)
+            public_url = self.supabase.storage.from_(bucket).get_public_url(path)
             
             return public_url
         except Exception as e:
@@ -1481,11 +1473,11 @@ class SupabaseClient:
 
     def check_field_duplicates(self, field: str, values: List[str]) -> List[Dict]:
         """Check for duplicate values in a specific field."""
-        if not self.client:
+        if self.supabase is None:
             return []
         
         try:
-            response = self.client.table("leads").select(field).in_(field, values).execute()
+            response = self.supabase.table("leads").select(field).in_(field, values).execute()
             return response.data or []
         except Exception as e:
             logger.error(f"Error checking duplicates for field {field}: {str(e)}")
@@ -1493,7 +1485,7 @@ class SupabaseClient:
 
     def insert_leads_batch(self, leads: List[Dict[str, Any]]) -> int:
         """Insert a batch of leads into the database."""
-        if not self.client:
+        if self.supabase is None:
             logger.warning("No Supabase client available. Simulating insert.")
             return len(leads)
         
@@ -1521,7 +1513,7 @@ class SupabaseClient:
                             processed_lead[key] = value
                 processed_leads.append(processed_lead)
             
-            response = self.client.table("leads").insert(processed_leads).execute()
+            response = self.supabase.table("leads").insert(processed_leads).execute()
             return len(response.data) if response.data else 0
         except Exception as e:
             logger.error(f"Error inserting leads batch: {str(e)}")
@@ -1529,12 +1521,12 @@ class SupabaseClient:
 
     def create_upload_batch(self, batch_data: Dict[str, Any]) -> int:
         """Create an upload batch record."""
-        if not self.client:
+        if self.supabase is None:
             logger.warning("No Supabase client available. Returning mock batch ID.")
             return 1
         
         try:
-            response = self.client.table("upload_batches").insert(batch_data).execute()
+            response = self.supabase.table("upload_batches").insert(batch_data).execute()
             return response.data[0]["id"] if response.data else 1
         except Exception as e:
             logger.error(f"Error creating upload batch: {str(e)}")
@@ -1542,13 +1534,13 @@ class SupabaseClient:
 
     def get_dashboard_stats(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
         """Get dashboard statistics from the database."""
-        if not self.client:
+        if self.supabase is None:
             logger.warning("No Supabase client available. Returning mock stats.")
             return self._get_mock_dashboard_stats()
         
         try:
             # Get total leads count
-            leads_query = self.client.table("leads").select("*", count="exact", head=True)
+            leads_query = self.supabase.table("leads").select("*", count="exact", head=True)
             if start_date:
                 leads_query = leads_query.gte("createdat", start_date)
             if end_date:
@@ -1569,7 +1561,7 @@ class SupabaseClient:
 
     def get_lead_trends(self, period: str, days: int) -> List[Dict[str, Any]]:
         """Get lead trends over time."""
-        if not self.client:
+        if self.supabase is None:
             return self._get_mock_lead_trends(period, days)
         
         try:
@@ -1582,11 +1574,11 @@ class SupabaseClient:
 
     def get_status_distribution(self) -> List[Dict[str, Any]]:
         """Get lead status distribution."""
-        if not self.client:
+        if self.supabase is None:
             return self._get_mock_status_distribution()
         
         try:
-            response = self.client.table("leads").select("leadstatus").execute()
+            response = self.supabase.table("leads").select("leadstatus").execute()
             leads = response.data or []
             
             status_counts = {}
@@ -1610,7 +1602,7 @@ class SupabaseClient:
 
     def get_source_performance(self) -> List[Dict[str, Any]]:
         """Get lead source performance metrics."""
-        if not self.client:
+        if self.supabase is None:
             return self._get_mock_source_performance()
         
         try:
@@ -1623,11 +1615,11 @@ class SupabaseClient:
 
     def get_recent_uploads(self, limit: int = 5) -> List[Dict[str, Any]]:
         """Get recent upload batches."""
-        if not self.client:
+        if self.supabase is None:
             return self._get_mock_recent_uploads(limit)
         
         try:
-            response = self.client.table("upload_batches").select("*").order("createdat", desc=True).limit(limit).execute()
+            response = self.supabase.table("upload_batches").select("*").order("createdat", desc=True).limit(limit).execute()
             return response.data or []
         except Exception as e:
             logger.error(f"Error getting recent uploads: {str(e)}")
@@ -1733,3 +1725,124 @@ class SupabaseClient:
         ]
         
         return uploads[:limit]
+
+    def add_dnc_entries(self, entries: List[Dict]) -> None:
+        """Add entries to the DNC list.
+        
+        Args:
+            entries: List of dictionaries containing DNC entry data
+                    Each entry should have: email, phone, firstname, lastname, companyname
+        """
+        if not entries:
+            return
+            
+        try:
+            # First, ensure we have a default DNC list
+            default_list = self.supabase.table("dnc_lists").select("*").eq("name", "Default DNC List").execute()
+            
+            if not default_list.data:
+                # Create default DNC list if it doesn't exist
+                default_list = self.supabase.table("dnc_lists").insert({
+                    "name": "Default DNC List",
+                    "type": "email",
+                    "description": "Default DNC list for system entries",
+                    "isactive": True,
+                    "createdat": datetime.now(timezone.utc).isoformat(),
+                    "lastupdated": datetime.now(timezone.utc).isoformat()
+                }).execute()
+            
+            dnc_list_id = default_list.data[0]["id"]
+            
+            # Prepare DNC entries
+            dnc_entries = []
+            for entry in entries:
+                # Add email entry
+                if entry.get("email"):
+                    dnc_entries.append({
+                        "value": entry["email"],
+                        "valuetype": "email",
+                        "source": "system",
+                        "reason": "Lead marked as DNC",
+                        "dnclistid": dnc_list_id,
+                        "createdat": datetime.now(timezone.utc).isoformat()
+                    })
+                
+                # Add phone entry
+                if entry.get("phone"):
+                    dnc_entries.append({
+                        "value": entry["phone"],
+                        "valuetype": "phone",
+                        "source": "system",
+                        "reason": "Lead marked as DNC",
+                        "dnclistid": dnc_list_id,
+                        "createdat": datetime.now(timezone.utc).isoformat()
+                    })
+            
+            if dnc_entries:
+                # Insert entries into the dnc_entries table
+                result = self.supabase.table("dnc_entries").insert(dnc_entries).execute()
+                logger.info(f"Added {len(dnc_entries)} DNC entries")
+                
+                # Update lastupdated timestamp for the DNC list
+                self.supabase.table("dnc_lists").update({
+                    "lastupdated": datetime.now(timezone.utc).isoformat()
+                }).eq("id", dnc_list_id).execute()
+                
+        except Exception as e:
+            logger.error(f"Error adding DNC entries: {e}")
+            raise
+
+    def get_leads_by_emails(self, emails: List[str]) -> List[Dict]:
+        """Get leads by their email addresses.
+        
+        Args:
+            emails: List of email addresses to search for
+            
+        Returns:
+            List of leads matching the provided email addresses
+        """
+        try:
+            # Convert emails to lowercase for case-insensitive matching
+            emails = [email.lower() for email in emails]
+            
+            # Query leads table for matching emails
+            result = self.supabase.table("leads").select("*").in_("email", emails).execute()
+            
+            return result.data
+        except Exception as e:
+            logger.error(f"Error getting leads by emails: {e}")
+            raise
+
+    def get_leads_by_phones(self, phones: List[str]) -> List[Dict]:
+        """Get leads by phone numbers."""
+        if not phones:
+            return []
+            
+        try:
+            # Query leads table for matching phones
+            result = self.supabase.table("leads").select("*").in_("phone", phones).execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error getting leads by phones: {e}")
+            raise
+
+    def insert_leads(self, leads: List[Dict]) -> Dict:
+        """Insert leads into the database."""
+        if not leads:
+            return {"data": [], "count": 0}
+            
+        try:
+            result = self.supabase.table("leads").insert(leads).execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error inserting leads: {e}")
+            raise
+
+    def insert_batch_record(self, batch_record: Dict) -> Dict:
+        """Insert a batch record into the database."""
+        try:
+            result = self.supabase.table("upload_batches").insert(batch_record).execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error inserting batch record: {e}")
+            raise

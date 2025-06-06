@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AlertCircle, FileSpreadsheet, Upload, CheckCircle, XCircle, RefreshCw, Eye, ArrowRight } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import * as XLSX from 'xlsx'
+import Papa from 'papaparse'
 
 interface FileData {
   name: string
@@ -44,21 +45,34 @@ interface ProcessingStep {
   message?: string
 }
 
+interface ProcessingResult {
+  success: boolean
+  batchId: string
+  totalLeads: number
+  validLeads: number
+  importedLeads: number
+  duplicateLeads: number
+  duplicateRows: any[]
+  dncLeads: number
+  newDncEntriesAdded: number
+  failedLeads: number
+}
+
 const SYSTEM_FIELDS = [
-  { value: "firstName", label: "First Name", required: true },
-  { value: "lastName", label: "Last Name", required: true },
-  { value: "email", label: "Email", required: true },
-  { value: "phone", label: "Phone", required: false },
-  { value: "company_name", label: "Company Name", required: false },
-  { value: "address", label: "Address", required: false },
-  { value: "city", label: "City", required: false },
-  { value: "state", label: "State", required: false },
-  { value: "zipCode", label: "Zip Code", required: false },
-  { value: "country", label: "Country", required: false },
-  { value: "taxId", label: "Tax ID", required: false },
-  { value: "loanAmount", label: "Loan Amount", required: false },
-  { value: "revenue", label: "Revenue", required: false },
-  { value: "dnc", label: "Do Not Call Status", required: false },
+  { value: "email", label: "Email", required: true, description: "Email address of the lead" },
+  { value: "firstname", label: "First Name", required: true, description: "First name of the contact" },
+  { value: "lastname", label: "Last Name", required: true, description: "Last name of the contact" },
+  { value: "phone", label: "Phone", required: false, description: "Phone number or mobile number" },
+  { value: "companyname", label: "Company Name", required: false, description: "Company or business name" },
+  { value: "address", label: "Address", required: false, description: "Address or street address" },
+  { value: "city", label: "City", required: false, description: "City" },
+  { value: "state", label: "State", required: false, description: "State or province" },
+  { value: "zipcode", label: "Zip Code", required: false, description: "Zip code or postal code" },
+  { value: "country", label: "Country", required: false, description: "Country" },
+  { value: "taxid", label: "Tax ID", required: false, description: "Tax ID or EIN number" },
+  { value: "loanamount", label: "Loan Amount", required: false, description: "Loan amount or requested amount" },
+  { value: "revenue", label: "Revenue", required: false, description: "Annual revenue or sales" },
+  { value: "dnc", label: "Do Not Call Status", required: false, description: "Do not call status or flag" },
 ]
 
 // DNC patterns for auto-detection
@@ -137,6 +151,9 @@ export function FileUploader() {
     defaultTags: [] as string[],
     autoTagRules: [] as any[],
   })
+
+  const [processingResult, setProcessingResult] = useState<ProcessingResult | null>(null)
+  const [showDuplicates, setShowDuplicates] = useState(false)
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     try {
@@ -569,81 +586,74 @@ export function FileUploader() {
   }
 
   const processAndUpload = async () => {
-    if (!fileData) return
-
-    setUploading(true)
-    setCurrentStep("processing")
-
     try {
-      // Step 3: Data Cleaning
+      setUploading(true)
+      setProgress(0)
+      setError(null)
+
+      if (!fileData) {
+        throw new Error("No file data available")
+      }
+
+      // Update processing steps
+      updateProcessingStep("parse", "completed")
+      updateProcessingStep("duplicate", "completed")
+      updateProcessingStep("mapping", "completed")
       updateProcessingStep("cleaning", "processing")
-      setProgress(75)
 
-      // Process DNC status before sending to backend
-      const processedData = fileData.content.map(row => {
-        const processedRow = { ...row };
-        const dncMapping = mappingRules.find(rule => rule.targetField === "dnc");
-        
-        if (dncMapping && dncMapping.sourceField) {
-          const dncValue = String(row[dncMapping.sourceField] || "").toLowerCase().trim();
-          processedRow.dnc = DNC_VALUES.has(dncValue);
+      // Prepare the request data
+      const requestData = {
+        data: fileData.content,
+        mappings: mappingRules,
+        cleaningSettings,
+        normalizationSettings,
+        taggingSettings: {
+          ...taggingSettings,
+          fileName: file?.name || "uploaded_file",
+          fileType: file?.name?.split(".").pop() || "csv"
         }
-        
-        return processedRow;
-      });
+      }
 
-      // Log the mappingRules and processedData before sending
-      console.log("Mapping Rules sent to backend:", mappingRules);
-      console.log("Processed Data sent to backend (sample):");
-      console.log(processedData.slice(0, 5)); // Log a sample of the processed data
-
+      // Send the request
       const response = await fetch(`${BACKEND_URL}/process-leads`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer dev_token",
-          "X-API-Key": "test_key"
         },
-        body: JSON.stringify({
-          data: processedData,
-          mappings: mappingRules,
-          cleaningSettings,
-          normalizationSettings,
-          taggingSettings,
-        }),
+        body: JSON.stringify(requestData),
       })
 
       if (!response.ok) {
-        throw new Error("Failed to process leads")
+        throw new Error(`Upload failed: ${response.statusText}`)
       }
 
       const result = await response.json()
+      setProcessingResult(result)
 
+      // Update processing steps
       updateProcessingStep("cleaning", "completed")
       updateProcessingStep("normalization", "completed")
       updateProcessingStep("tagging", "completed")
-      updateProcessingStep("upload", "completed", `Uploaded ${result.processedCount} leads`)
+      updateProcessingStep("upload", "completed")
 
-      setProgress(100)
-
+      // Show success message
       toast({
-        title: "Success",
-        description: `Successfully processed and uploaded ${result.processedCount} leads`,
+        title: "Upload Complete",
+        description: `Successfully processed ${result.importedLeads} leads. ${result.duplicateLeads} duplicates found.`,
       })
 
-      // Reset form
-      setTimeout(() => {
-        setFile(null)
-        setFileData(null)
-        setCurrentStep("upload")
-        setProgress(0)
-        setProcessingSteps((prev) => prev.map((step) => ({ ...step, status: "pending", message: undefined })))
-      }, 3000)
+      // Reset file state
+      setFile(null)
+      setFileData(null)
+      setCurrentStep("upload")
+
     } catch (error: any) {
-      setError(error.message)
+      console.error("Error in processAndUpload:", error)
+      setError(error.message || "Failed to process and upload file")
       updateProcessingStep("upload", "error", error.message)
     } finally {
       setUploading(false)
+      setProgress(100)
     }
   }
 
@@ -773,7 +783,9 @@ export function FileUploader() {
         <Card>
           <CardHeader>
             <CardTitle>Field Mapping</CardTitle>
-            <p className="text-sm text-muted-foreground">Review and adjust the automatic field mapping</p>
+            <p className="text-sm text-muted-foreground">
+              Review and adjust the automatic field mapping. Required fields are marked with an asterisk (*).
+            </p>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
@@ -784,48 +796,87 @@ export function FileUploader() {
                     <TableHead>Target Field</TableHead>
                     <TableHead>Confidence</TableHead>
                     <TableHead>Required</TableHead>
+                    <TableHead>Sample Value</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mappingRules.map((rule, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{rule.sourceField}</TableCell>
-                      <TableCell>
-                        <Select value={rule.targetField} onValueChange={(value) => updateMapping(index, value)}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">-- Select Field --</SelectItem>
-                            {SYSTEM_FIELDS.map((field) => (
-                              <SelectItem key={field.value} value={field.value}>
-                                {field.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            rule.confidence > 0.8 ? "default" : rule.confidence > 0.5 ? "secondary" : "destructive"
-                          }
-                        >
-                          {Math.round(rule.confidence * 100)}%
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Checkbox checked={rule.isRequired} disabled />
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {mappingRules.map((rule: MappingRule, index: number) => {
+                    // Get sample value for this field
+                    const sampleValue = fileData?.content[0]?.[rule.sourceField] || "-"
+                    
+                    return (
+                      <TableRow key={index}>
+                        <TableCell className="font-medium">{rule.sourceField}</TableCell>
+                        <TableCell>
+                          <Select 
+                            value={rule.targetField} 
+                            onValueChange={(value) => updateMapping(index, value)}
+                          >
+                            <SelectTrigger className="w-[200px]">
+                              <SelectValue placeholder="Select field..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="">-- Select Field --</SelectItem>
+                              {SYSTEM_FIELDS.map((field) => (
+                                <SelectItem 
+                                  key={field.value} 
+                                  value={field.value}
+                                  className="flex items-center gap-2"
+                                >
+                                  <div>
+                                    <div className="font-medium">
+                                      {field.label}
+                                      {field.required && <span className="text-red-500 ml-1">*</span>}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {field.description}
+                                    </div>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              rule.confidence > 0.8 ? "default" : 
+                              rule.confidence > 0.5 ? "secondary" : 
+                              "destructive"
+                            }
+                          >
+                            {Math.round(rule.confidence * 100)}%
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Checkbox checked={rule.isRequired} disabled />
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate" title={sampleValue}>
+                          {sampleValue}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
 
-              <Button onClick={() => generatePreview(fileData!, mappingRules)} className="w-full">
-                <Eye className="mr-2 h-4 w-4" />
-                Generate Preview
-              </Button>
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-muted-foreground">
+                  {mappingRules.filter((r: MappingRule) => r.isRequired && !r.targetField).length > 0 && (
+                    <p className="text-red-500">
+                      Please map all required fields before proceeding.
+                    </p>
+                  )}
+                </div>
+                <Button 
+                  onClick={() => generatePreview(fileData!, mappingRules)} 
+                  className="w-full"
+                  disabled={mappingRules.filter((r: MappingRule) => r.isRequired && !r.targetField).length > 0}
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  Generate Preview
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -869,6 +920,95 @@ export function FileUploader() {
                 <ArrowRight className="mr-2 h-4 w-4" />
                 Process & Upload to Database
               </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {processingResult && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Upload Results</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium">Total Leads</p>
+                  <p className="text-2xl font-bold">{processingResult.totalLeads}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Successfully Imported</p>
+                  <p className="text-2xl font-bold text-green-600">{processingResult.importedLeads}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Duplicates Found</p>
+                  <p className="text-2xl font-bold text-yellow-600">{processingResult.duplicateLeads}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">DNC Leads</p>
+                  <p className="text-2xl font-bold text-red-600">{processingResult.dncLeads}</p>
+                </div>
+              </div>
+
+              {processingResult.duplicateLeads > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-medium">Duplicate Leads</h3>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowDuplicates(!showDuplicates)}
+                    >
+                      {showDuplicates ? "Hide Details" : "Show Details"}
+                    </Button>
+                  </div>
+
+                  {showDuplicates && (
+                    <div className="border rounded-lg">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Phone</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Company</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {processingResult.duplicateRows.map((row, index) => (
+                            <TableRow key={index}>
+                              <TableCell>{row.email || "-"}</TableCell>
+                              <TableCell>{row.phone || "-"}</TableCell>
+                              <TableCell>
+                                {[row.firstName, row.lastName].filter(Boolean).join(" ") || "-"}
+                              </TableCell>
+                              <TableCell>{row.companyname || "-"}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const csv = Papa.unparse(processingResult.duplicateRows)
+                      const blob = new Blob([csv], { type: "text/csv" })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement("a")
+                      a.href = url
+                      a.download = "duplicate_leads.csv"
+                      document.body.appendChild(a)
+                      a.click()
+                      document.body.removeChild(a)
+                      URL.revokeObjectURL(url)
+                    }}
+                  >
+                    Download Duplicates CSV
+                  </Button>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
