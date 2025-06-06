@@ -47,15 +47,15 @@ interface ProcessingStep {
 
 interface ProcessingResult {
   success: boolean
-  batchId: string
-  totalLeads: number
-  validLeads: number
-  importedLeads: number
-  duplicateLeads: number
-  duplicateRows: any[]
-  dncLeads: number
-  newDncEntriesAdded: number
-  failedLeads: number
+  message: string
+  stats: {
+    total: number
+    cleaned: number
+    duplicates: number
+    dnc: number
+    inserted: number
+  }
+  batch_id: string
 }
 
 const SYSTEM_FIELDS = [
@@ -587,7 +587,7 @@ export function FileUploader() {
 
   const processAndUpload = async () => {
     try {
-      setUploading(true)
+    setUploading(true)
       setProgress(0)
       setError(null)
 
@@ -605,13 +605,17 @@ export function FileUploader() {
       const requestData = {
         data: fileData.content,
         mappings: mappingRules,
-        cleaningSettings,
-        normalizationSettings,
-        taggingSettings: {
+        filename: file?.name || "uploaded_file",
+        cleaning_settings: cleaningSettings,
+        normalization_settings: normalizationSettings,
+        tagging_settings: {
           ...taggingSettings,
           fileName: file?.name || "uploaded_file",
           fileType: file?.name?.split(".").pop() || "csv"
-        }
+        },
+        source: "manual_upload",  // Default source
+        supplier_id: null,  // Will be set by backend if needed
+        user_id: null  // Will be set by backend if needed
       }
 
       // Send the request
@@ -639,13 +643,12 @@ export function FileUploader() {
       // Show success message
       toast({
         title: "Upload Complete",
-        description: `Successfully processed ${result.importedLeads} leads. ${result.duplicateLeads} duplicates found.`,
+        description: `Successfully processed ${result.stats.inserted} leads. ${result.stats.duplicates} duplicates found.`,
       })
 
-      // Reset file state
-      setFile(null)
-      setFileData(null)
-      setCurrentStep("upload")
+      // Reset file state but don't reset step
+        setFile(null)
+        setFileData(null)
 
     } catch (error: any) {
       console.error("Error in processAndUpload:", error)
@@ -805,19 +808,19 @@ export function FileUploader() {
                     const sampleValue = fileData?.content[0]?.[rule.sourceField] || "-"
                     
                     return (
-                      <TableRow key={index}>
+                    <TableRow key={index}>
                         <TableCell className="font-medium">{rule.sourceField}</TableCell>
-                        <TableCell>
+                      <TableCell>
                           <Select 
                             value={rule.targetField} 
                             onValueChange={(value) => updateMapping(index, value)}
                           >
                             <SelectTrigger className="w-[200px]">
                               <SelectValue placeholder="Select field..." />
-                            </SelectTrigger>
-                            <SelectContent>
+                          </SelectTrigger>
+                          <SelectContent>
                               <SelectItem value="">-- Select Field --</SelectItem>
-                              {SYSTEM_FIELDS.map((field) => (
+                            {SYSTEM_FIELDS.map((field) => (
                                 <SelectItem 
                                   key={field.value} 
                                   value={field.value}
@@ -825,36 +828,36 @@ export function FileUploader() {
                                 >
                                   <div>
                                     <div className="font-medium">
-                                      {field.label}
+                                {field.label}
                                       {field.required && <span className="text-red-500 ml-1">*</span>}
                                     </div>
                                     <div className="text-xs text-muted-foreground">
                                       {field.description}
                                     </div>
                                   </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
                               rule.confidence > 0.8 ? "default" : 
                               rule.confidence > 0.5 ? "secondary" : 
                               "destructive"
-                            }
-                          >
-                            {Math.round(rule.confidence * 100)}%
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Checkbox checked={rule.isRequired} disabled />
-                        </TableCell>
+                          }
+                        >
+                          {Math.round(rule.confidence * 100)}%
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Checkbox checked={rule.isRequired} disabled />
+                      </TableCell>
                         <TableCell className="max-w-[200px] truncate" title={sampleValue}>
                           {sampleValue}
                         </TableCell>
-                      </TableRow>
+                    </TableRow>
                     )
                   })}
                 </TableBody>
@@ -873,9 +876,9 @@ export function FileUploader() {
                   className="w-full"
                   disabled={mappingRules.filter((r: MappingRule) => r.isRequired && !r.targetField).length > 0}
                 >
-                  <Eye className="mr-2 h-4 w-4" />
-                  Generate Preview
-                </Button>
+                <Eye className="mr-2 h-4 w-4" />
+                Generate Preview
+              </Button>
               </div>
             </div>
           </CardContent>
@@ -935,80 +938,21 @@ export function FileUploader() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm font-medium">Total Leads</p>
-                  <p className="text-2xl font-bold">{processingResult.totalLeads}</p>
+                  <p className="text-2xl font-bold">{processingResult.stats.total}</p>
                 </div>
                 <div>
                   <p className="text-sm font-medium">Successfully Imported</p>
-                  <p className="text-2xl font-bold text-green-600">{processingResult.importedLeads}</p>
+                  <p className="text-2xl font-bold text-green-600">{processingResult.stats.inserted}</p>
                 </div>
                 <div>
                   <p className="text-sm font-medium">Duplicates Found</p>
-                  <p className="text-2xl font-bold text-yellow-600">{processingResult.duplicateLeads}</p>
+                  <p className="text-2xl font-bold text-yellow-600">{processingResult.stats.duplicates}</p>
                 </div>
                 <div>
                   <p className="text-sm font-medium">DNC Leads</p>
-                  <p className="text-2xl font-bold text-red-600">{processingResult.dncLeads}</p>
+                  <p className="text-2xl font-bold text-red-600">{processingResult.stats.dnc}</p>
                 </div>
               </div>
-
-              {processingResult.duplicateLeads > 0 && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-medium">Duplicate Leads</h3>
-                    <Button
-                      variant="outline"
-                      onClick={() => setShowDuplicates(!showDuplicates)}
-                    >
-                      {showDuplicates ? "Hide Details" : "Show Details"}
-                    </Button>
-                  </div>
-
-                  {showDuplicates && (
-                    <div className="border rounded-lg">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Email</TableHead>
-                            <TableHead>Phone</TableHead>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Company</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {processingResult.duplicateRows.map((row, index) => (
-                            <TableRow key={index}>
-                              <TableCell>{row.email || "-"}</TableCell>
-                              <TableCell>{row.phone || "-"}</TableCell>
-                              <TableCell>
-                                {[row.firstName, row.lastName].filter(Boolean).join(" ") || "-"}
-                              </TableCell>
-                              <TableCell>{row.companyname || "-"}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      const csv = Papa.unparse(processingResult.duplicateRows)
-                      const blob = new Blob([csv], { type: "text/csv" })
-                      const url = URL.createObjectURL(blob)
-                      const a = document.createElement("a")
-                      a.href = url
-                      a.download = "duplicate_leads.csv"
-                      document.body.appendChild(a)
-                      a.click()
-                      document.body.removeChild(a)
-                      URL.revokeObjectURL(url)
-                    }}
-                  >
-                    Download Duplicates CSV
-                  </Button>
-                </div>
-              )}
             </div>
           </CardContent>
         </Card>
@@ -1016,3 +960,5 @@ export function FileUploader() {
     </div>
   )
 }
+
+

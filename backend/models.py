@@ -248,6 +248,10 @@ class AutoMappingRequest(BaseModel):
 class ProcessLeadsRequest(BaseModel):
     data: List[Dict[str, Any]]
     mappings: List[Dict[str, Any]]
-    cleaningSettings: Dict[str, Any]
-    normalizationSettings: Dict[str, Any]
-    taggingSettings: Dict[str, Any]
+    filename: str
+    normalization_settings: Optional[Dict[str, Any]] = None
+    tagging_settings: Optional[Dict[str, Any]] = None
+    cleaning_settings: Optional[Dict[str, Any]] = None
+    source: Optional[str] = "file_upload"
+    supplier_id: Optional[int] = None
+    user_id: Optional[int] = None

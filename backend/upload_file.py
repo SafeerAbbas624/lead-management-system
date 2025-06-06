@@ -7,11 +7,15 @@ from datetime import datetime, timezone
 import logging
 import numpy as np
 from sentence_transformers import SentenceTransformer
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from pydantic import BaseModel
+import json
+import pandas as pd
 
 from models import DuplicateCheckRequest, AutoMappingRequest, ProcessLeadsRequest
 from database import SupabaseClient
+from field_mapper import FieldMapper
+from duplicate_checker import DuplicateChecker
 from data_processor import DataProcessor
 
 # Configure logging
@@ -29,14 +33,6 @@ class MappingRule(BaseModel):
     targetField: str
     confidence: float
     isRequired: bool
-
-class ProcessLeadsRequest(BaseModel):
-    """Request model for processing leads."""
-    data: List[Dict[str, Any]]
-    mappings: List[Dict[str, str]]
-    cleaningSettings: Optional[Dict[str, Any]] = None
-    normalizationSettings: Optional[Dict[str, Any]] = None
-    filename: Optional[str] = None  # Add filename field
 
 # Map of internal fields to descriptions (for max accuracy)
 FIELD_DESCRIPTIONS = {
@@ -168,7 +164,7 @@ class NLPFieldMapper:
             })
         
         return mappings
-
+    
     def _calculate_similarity(self, source: str, target_patterns: List[str]) -> float:
         source_clean = re.sub(r'[^a-zA-Z0-9]', '', source.lower())
         max_similarity = 0
@@ -294,11 +290,11 @@ def handle_auto_mapping(request: AutoMappingRequest, nlp_mapper: NLPFieldMapper)
         
         return {
             "success": True,
-            "mappings": mappings,
+        "mappings": mappings,
             "totalFields": len(request.headers),
-            "totalMapped": len([m for m in mappings if m["targetField"]])
+        "totalMapped": len([m for m in mappings if m["targetField"]])
         }
-        
+
     except Exception as e:
         logger.error(f"Error in handle_auto_mapping: {e}")
         raise
@@ -346,8 +342,8 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
         # Clean and normalize the data
         cleaned_data = await data_processor.clean_and_normalize_leads(
             data,
-            cleaning_settings=request.cleaningSettings,
-            normalization_settings=request.normalizationSettings
+            cleaning_settings=request.cleaning_settings,
+            normalization_settings=request.normalization_settings
         )
         # Ensure cleaned_data is a list
         if isinstance(cleaned_data, tuple):
@@ -366,60 +362,84 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
         
         # First check for duplicates within the current batch
         for lead in cleaned_data:
-            email = lead.get('email', '').lower()
-            phone = lead.get('phone', '')
+            email = lead.get('email', '').lower().strip()
+            phone = lead.get('phone', '').strip()
             
-            if email in seen_emails or phone in seen_phones:
+            # Skip if both email and phone are empty
+            if not email and not phone:
                 duplicates.append(lead)
                 continue
                 
-            seen_emails.add(email)
-            seen_phones.add(phone)
+            # Check for duplicates using both email and phone
+            is_duplicate = False
+            if email and email in seen_emails:
+                is_duplicate = True
+            if phone and phone in seen_phones:
+                is_duplicate = True
+                
+            if is_duplicate:
+                duplicates.append(lead)
+                continue
+                
+            if email:
+                seen_emails.add(email)
+            if phone:
+                seen_phones.add(phone)
             unique_leads.append(lead)
         
         # Then check against existing leads in database
         if unique_leads:
-            existing_emails = [lead.get('email', '').lower() for lead in unique_leads]
-            existing_phones = [lead.get('phone', '') for lead in unique_leads]
+            existing_emails = [lead.get('email', '').lower().strip() for lead in unique_leads if lead.get('email')]
+            existing_phones = [lead.get('phone', '').strip() for lead in unique_leads if lead.get('phone')]
             
             # Get existing leads by email and phone
-            email_duplicates = db.get_leads_by_emails(existing_emails)
-            phone_duplicates = db.get_leads_by_phones(existing_phones)
+            email_duplicates = db.get_leads_by_emails(existing_emails) if existing_emails else []
+            phone_duplicates = db.get_leads_by_phones(existing_phones) if existing_phones else []
             
             # Create sets of existing emails and phones for faster lookup
-            existing_email_set = {lead['email'].lower() for lead in email_duplicates}
-            existing_phone_set = {lead['phone'] for lead in phone_duplicates}
+            existing_email_set = {lead['email'].lower().strip() for lead in email_duplicates if lead.get('email')}
+            existing_phone_set = {lead['phone'].strip() for lead in phone_duplicates if lead.get('phone')}
             
             # Filter out duplicates
             final_leads = []
             for lead in unique_leads:
-                email = lead.get('email', '').lower()
-                phone = lead.get('phone', '')
+                email = lead.get('email', '').lower().strip()
+                phone = lead.get('phone', '').strip()
                 
-                if email in existing_email_set or phone in existing_phone_set:
+                if (email and email in existing_email_set) or (phone and phone in existing_phone_set):
                     duplicates.append(lead)
                 else:
-                    # Prepare lead data according to schema
-                    final_lead = {
-                        'email': lead.get('email'),
-                        'firstname': lead.get('firstname'),
-                        'lastname': lead.get('lastname'),
-                        'phone': lead.get('phone'),
-                        'companyname': lead.get('companyname'),
-                        'leadsource': 'file_upload',
-                        'leadstatus': 'new',
-                        'leadscore': 0,
-                        'leadcost': 0,
-                        'exclusivity': False,
-                        'tags': [],
-                        'createdat': datetime.now(timezone.utc).isoformat(),
-                        'metadata': {
-                            'revenue': lead.get('revenue', 0)
-                        }
-                    }
-                    final_leads.append(final_lead)
+                    final_leads.append(lead)
         else:
             final_leads = []
+        
+        # Create batch record first to get batch_id
+        batch_record = {
+            'filename': request.filename,
+            'filetype': 'csv',
+            'status': 'processing',
+            'totalleads': len(cleaned_data),
+            'cleanedleads': len(unique_leads),
+            'duplicateleads': len(duplicates),
+            'dncmatches': 0,  # We'll update this after processing DNC entries
+            'originalheaders': headers,
+            'mappingrules': request.mappings,
+            'processingprogress': 0,
+            'sourcename': request.source,
+            'createdat': datetime.now(timezone.utc).isoformat()
+        }
+        if request.supplier_id:
+            batch_record['supplierid'] = request.supplier_id
+        if request.user_id:
+            batch_record['uploadedby'] = request.user_id
+            
+        try:
+            batch_result = db.create_upload_batch(batch_record)
+            batch_id = batch_result['id']
+            logger.info(f"Created batch record with ID: {batch_id}")
+        except Exception as e:
+            logger.error(f"Error creating batch record: {e}")
+            raise
         
         # Collect DNC entries
         dnc_entries = []
@@ -431,7 +451,7 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
                 dnc_entry = {
                     'value': lead.get('email', ''),
                     'valuetype': 'email',
-                    'source': 'upload',
+                    'source': request.source,
                     'reason': 'User marked as DNC',
                     'dnclistid': dnc_list['id'],
                     'createdat': datetime.now(timezone.utc).isoformat()
@@ -442,7 +462,7 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
                     phone_dnc = {
                         'value': lead.get('phone', ''),
                         'valuetype': 'phone',
-                        'source': 'upload',
+                        'source': request.source,
                         'reason': 'User marked as DNC',
                         'dnclistid': dnc_list['id'],
                         'createdat': datetime.now(timezone.utc).isoformat()
@@ -453,11 +473,21 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
         inserted_leads = []
         if final_leads:
             try:
+                # Add batch_id to all leads
+                for lead in final_leads:
+                    lead['uploadbatchid'] = batch_id
+                
                 result = db.insert_leads(final_leads)
                 inserted_leads = result.get('data', [])
                 logger.info(f"Successfully inserted {len(inserted_leads)} leads")
             except Exception as e:
                 logger.error(f"Error inserting leads: {e}")
+                # Update batch record with error
+                db.update_batch_record(batch_id, {
+                    'status': 'error',
+                    'errormessage': str(e),
+                    'completedat': datetime.now(timezone.utc).isoformat()
+                })
                 raise
         
         # Add DNC entries
@@ -469,26 +499,17 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
                 logger.error(f"Error adding DNC entries: {e}")
                 # Don't raise here, as leads were already inserted
         
-        # Create batch record
-        batch_record = {
-            'filename': request.filename or 'unknown_file.csv',  # Use provided filename or default
-            'filetype': 'csv',
-            'status': 'completed',
-            'totalleads': len(cleaned_data),
-            'cleanedleads': len(unique_leads),
-            'duplicateleads': len(duplicates),
-            'dncmatches': len(dnc_entries),
-            'originalheaders': headers,
-            'mappingrules': request.mappings,
-            'createdat': datetime.now(timezone.utc).isoformat(),
-            'completedat': datetime.now(timezone.utc).isoformat()
-        }
-        
+        # Update batch record with completion status
         try:
-            db.insert_batch_record(batch_record)
-            logger.info("Created batch record")
+            db.update_batch_record(batch_id, {
+                'status': 'completed',
+                'dncmatches': len(dnc_entries),
+                'completedat': datetime.now(timezone.utc).isoformat(),
+                'processingprogress': 100
+            })
+            logger.info("Updated batch record with completion status")
         except Exception as e:
-            logger.error(f"Error creating batch record: {e}")
+            logger.error(f"Error updating batch record: {e}")
             # Don't raise here, as leads were already inserted
         
         return {
@@ -500,7 +521,8 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
                 'duplicates': len(duplicates),
                 'dnc': len(dnc_entries),
                 'inserted': len(inserted_leads)
-            }
+            },
+            'batch_id': batch_id
         }
         
     except Exception as e:

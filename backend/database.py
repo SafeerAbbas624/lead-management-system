@@ -66,6 +66,7 @@ class SupabaseClient:
             if not response.data:
                 raise ValueError("Failed to create upload batch")
             
+            # Return the first item from response.data as a dictionary
             return response.data[0]
         except Exception as e:
             logger.error(f"Error creating upload batch: {str(e)}")
@@ -202,51 +203,28 @@ class SupabaseClient:
             logger.error(f"Error getting DNC lists: {str(e)}")
             return []
     
-    def get_or_create_dnc_list(self, name: str, list_type: str) -> int:
-        """
-        Get a DNC list by name, or create it if it doesn't exist.
-        
-        Args:
-            name: Name of the DNC list
-            list_type: Type of the DNC list (e.g., 'manual', 'upload')
-            
-        Returns:
-            ID of the DNC list
-        """
-        if self.supabase is None:
-            logger.warning("No Supabase client available. Returning mock DNC list ID.")
-            # In mock mode, simulate creating/getting a list
-            # A simple mock ID is sufficient for the flow
-            return 123 # Mock list ID
-            
+    def get_or_create_dnc_list(self, name: str, type: str) -> Dict[str, Any]:
+        """Get or create a DNC list."""
         try:
-            # Try to get the list by name
-            response = self.supabase.table("dnc_lists").select("id").eq("name", name).limit(1).execute()
+            # Try to get existing list
+            result = self.supabase.table("dnc_lists").select("*").eq("name", name).execute()
+            if result.data:
+                return result.data[0]
             
-            if response.data:
-                # List found, return its ID
-                return response.data[0]["id"]
-            else:
-                # List not found, create it
-                logger.info(f"DNC list '{name}' not found, creating.")
-                new_list_data = {
-                    "name": name,
-                    "type": list_type,
-                    "description": f"Automatically created list for {list_type} entries.",
-                    "isactive": True,
-                    "createdat": datetime.now().isoformat()
-                }
-                create_response = self.supabase.table("dnc_lists").insert(new_list_data).execute()
-                
-                if not create_response.data:
-                    raise ValueError(f"Failed to create DNC list '{name}'")
-                    
-                return create_response.data[0]["id"]
-                
+            # Create new list if not found
+            new_list = {
+                "name": name,
+                "type": type,
+                "description": f"Default {type} DNC list",
+                "isactive": True,
+                "createdat": datetime.now(timezone.utc).isoformat(),
+                "lastupdated": datetime.now(timezone.utc).isoformat()
+            }
+            result = self.supabase.table("dnc_lists").insert(new_list).execute()
+            return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Error getting or creating DNC list '{name}': {str(e)}")
-            # Depending on desired error handling, you might raise, return a default, or handle differently
-            raise # Re-raise the exception to be handled by the caller
+            logger.error(f"Error getting/creating DNC list: {e}")
+            raise
     
     def add_dnc_entry(self, entry_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1519,19 +1497,6 @@ class SupabaseClient:
             logger.error(f"Error inserting leads batch: {str(e)}")
             raise
 
-    def create_upload_batch(self, batch_data: Dict[str, Any]) -> int:
-        """Create an upload batch record."""
-        if self.supabase is None:
-            logger.warning("No Supabase client available. Returning mock batch ID.")
-            return 1
-        
-        try:
-            response = self.supabase.table("upload_batches").insert(batch_data).execute()
-            return response.data[0]["id"] if response.data else 1
-        except Exception as e:
-            logger.error(f"Error creating upload batch: {str(e)}")
-            return 1
-
     def get_dashboard_stats(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
         """Get dashboard statistics from the database."""
         if self.supabase is None:
@@ -1726,123 +1691,76 @@ class SupabaseClient:
         
         return uploads[:limit]
 
-    def add_dnc_entries(self, entries: List[Dict]) -> None:
-        """Add entries to the DNC list.
-        
-        Args:
-            entries: List of dictionaries containing DNC entry data
-                    Each entry should have: email, phone, firstname, lastname, companyname
-        """
+    def add_dnc_entries(self, entries: List[Dict[str, Any]]) -> None:
+        """Add entries to the DNC list."""
         if not entries:
             return
             
         try:
-            # First, ensure we have a default DNC list
-            default_list = self.supabase.table("dnc_lists").select("*").eq("name", "Default DNC List").execute()
+            # Insert entries into the dnc_entries table
+            result = self.supabase.table("dnc_entries").insert(entries).execute()
+            logger.info(f"Added {len(entries)} DNC entries")
             
-            if not default_list.data:
-                # Create default DNC list if it doesn't exist
-                default_list = self.supabase.table("dnc_lists").insert({
-                    "name": "Default DNC List",
-                    "type": "email",
-                    "description": "Default DNC list for system entries",
-                    "isactive": True,
-                    "createdat": datetime.now(timezone.utc).isoformat(),
-                    "lastupdated": datetime.now(timezone.utc).isoformat()
-                }).execute()
-            
-            dnc_list_id = default_list.data[0]["id"]
-            
-            # Prepare DNC entries
-            dnc_entries = []
-            for entry in entries:
-                # Add email entry
-                if entry.get("email"):
-                    dnc_entries.append({
-                        "value": entry["email"],
-                        "valuetype": "email",
-                        "source": "system",
-                        "reason": "Lead marked as DNC",
-                        "dnclistid": dnc_list_id,
-                        "createdat": datetime.now(timezone.utc).isoformat()
-                    })
-                
-                # Add phone entry
-                if entry.get("phone"):
-                    dnc_entries.append({
-                        "value": entry["phone"],
-                        "valuetype": "phone",
-                        "source": "system",
-                        "reason": "Lead marked as DNC",
-                        "dnclistid": dnc_list_id,
-                        "createdat": datetime.now(timezone.utc).isoformat()
-                    })
-            
-            if dnc_entries:
-                # Insert entries into the dnc_entries table
-                result = self.supabase.table("dnc_entries").insert(dnc_entries).execute()
-                logger.info(f"Added {len(dnc_entries)} DNC entries")
-                
-                # Update lastupdated timestamp for the DNC list
+            # Update lastupdated timestamp for affected DNC lists
+            dnc_list_ids = {entry['dnclistid'] for entry in entries}
+            for list_id in dnc_list_ids:
                 self.supabase.table("dnc_lists").update({
                     "lastupdated": datetime.now(timezone.utc).isoformat()
-                }).eq("id", dnc_list_id).execute()
-                
+                }).eq("id", list_id).execute()
         except Exception as e:
             logger.error(f"Error adding DNC entries: {e}")
             raise
 
-    def get_leads_by_emails(self, emails: List[str]) -> List[Dict]:
-        """Get leads by their email addresses.
-        
-        Args:
-            emails: List of email addresses to search for
+    def get_leads_by_emails(self, emails: List[str]) -> List[Dict[str, Any]]:
+        """Get leads by email addresses."""
+        if not emails:
+            return []
             
-        Returns:
-            List of leads matching the provided email addresses
-        """
         try:
-            # Convert emails to lowercase for case-insensitive matching
-            emails = [email.lower() for email in emails]
-            
-            # Query leads table for matching emails
             result = self.supabase.table("leads").select("*").in_("email", emails).execute()
-            
             return result.data
         except Exception as e:
             logger.error(f"Error getting leads by emails: {e}")
-            raise
+            return []
 
-    def get_leads_by_phones(self, phones: List[str]) -> List[Dict]:
+    def get_leads_by_phones(self, phones: List[str]) -> List[Dict[str, Any]]:
         """Get leads by phone numbers."""
         if not phones:
             return []
             
         try:
-            # Query leads table for matching phones
             result = self.supabase.table("leads").select("*").in_("phone", phones).execute()
             return result.data
         except Exception as e:
             logger.error(f"Error getting leads by phones: {e}")
-            raise
+            return []
 
-    def insert_leads(self, leads: List[Dict]) -> Dict:
+    def insert_leads(self, leads: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Insert leads into the database."""
         if not leads:
-            return {"data": [], "count": 0}
+            return {"data": []}
             
         try:
             result = self.supabase.table("leads").insert(leads).execute()
-            return result.data
+            return result
         except Exception as e:
             logger.error(f"Error inserting leads: {e}")
             raise
 
-    def insert_batch_record(self, batch_record: Dict) -> Dict:
-        """Insert a batch record into the database."""
+    def insert_batch_record(self, batch_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Insert a new batch record."""
         try:
-            result = self.supabase.table("upload_batches").insert(batch_record).execute()
-            return result.data
+            result = self.supabase.table("upload_batches").insert(batch_data).execute()
+            return result
         except Exception as e:
             logger.error(f"Error inserting batch record: {e}")
+            raise
+
+    def update_batch_record(self, batch_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing batch record."""
+        try:
+            result = self.supabase.table("upload_batches").update(update_data).eq("id", batch_id).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Error updating batch record: {e}")
             raise
