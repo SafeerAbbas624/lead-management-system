@@ -401,7 +401,8 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
             existing_phone_set = {lead['phone'].strip() for lead in phone_duplicates if lead.get('phone')}
             
             # Filter out duplicates
-            final_leads = []
+            final_leads_for_insert = []
+            dnc_leads_for_processing = []
             for lead in unique_leads:
                 email = lead.get('email', '').lower().strip()
                 phone = lead.get('phone', '').strip()
@@ -409,9 +410,47 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
                 if (email and email in existing_email_set) or (phone and phone in existing_phone_set):
                     duplicates.append(lead)
                 else:
-                    final_leads.append(lead)
+                    # Separate leads marked as DNC for dnc_entries table
+                    if lead.get('dnc', '').upper() == 'Y':
+                        dnc_leads_for_processing.append(lead)
+                    
+                    # Prepare lead data according to leads table schema
+                    lead_to_insert = {
+                        'email': lead.get('email'),
+                        'firstname': lead.get('firstname'),
+                        'lastname': lead.get('lastname'),
+                        'phone': lead.get('phone'),
+                        'companyname': lead.get('companyname'),
+                        'taxid': lead.get('taxid'), # Added taxid
+                        'address': lead.get('address'), # Added address
+                        'city': lead.get('city'), # Added city
+                        'state': lead.get('state'), # Added state
+                        'zipcode': lead.get('zipcode'), # Added zipcode
+                        'country': lead.get('country'), # Added country
+                        'leadsource': request.source,
+                        'leadstatus': 'new',
+                        'leadscore': lead.get('leadscore', 0), # Added leadscore
+                        'leadcost': lead.get('leadcost', 0), # Added leadcost
+                        'exclusivity': lead.get('exclusivity', False), # Added exclusivity
+                        'exclusivitynotes': lead.get('exclusivitynotes'), # Added exclusivitynotes
+                        'metadata': {
+                            'revenue': lead.get('revenue', 0),
+                            # Include other potential metadata fields here if needed
+                            **{k: v for k, v in lead.items() if k not in ['email', 'firstname', 'lastname', 'phone', 'companyname', 'taxid', 'address', 'city', 'state', 'zipcode', 'country', 'leadsource', 'leadstatus', 'leadscore', 'leadcost', 'exclusivity', 'exclusivitynotes', 'dnc']}
+                        },
+                        'tags': lead.get('tags', []), # Added tags
+                        'createdat': datetime.now(timezone.utc).isoformat()
+                    }
+
+                    if request.supplier_id:
+                        lead_to_insert['supplierid'] = request.supplier_id
+                    if request.user_id:
+                        lead_to_insert['uploadedby'] = request.user_id
+                    
+                    final_leads_for_insert.append(lead_to_insert)
         else:
-            final_leads = []
+            final_leads_for_insert = []
+            dnc_leads_for_processing = []
         
         # Create batch record first to get batch_id
         batch_record = {
@@ -441,43 +480,15 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
             logger.error(f"Error creating batch record: {e}")
             raise
         
-        # Collect DNC entries
-        dnc_entries = []
-        for lead in final_leads:
-            if lead.get('dnc', '').upper() == 'Y':
-                # First ensure we have a default DNC list
-                dnc_list = db.get_or_create_dnc_list("Default DNC List", "email")
-                
-                dnc_entry = {
-                    'value': lead.get('email', ''),
-                    'valuetype': 'email',
-                    'source': request.source,
-                    'reason': 'User marked as DNC',
-                    'dnclistid': dnc_list['id'],
-                    'createdat': datetime.now(timezone.utc).isoformat()
-                }
-                dnc_entries.append(dnc_entry)
-                
-                if lead.get('phone'):
-                    phone_dnc = {
-                        'value': lead.get('phone', ''),
-                        'valuetype': 'phone',
-                        'source': request.source,
-                        'reason': 'User marked as DNC',
-                        'dnclistid': dnc_list['id'],
-                        'createdat': datetime.now(timezone.utc).isoformat()
-                    }
-                    dnc_entries.append(phone_dnc)
-        
-        # Insert leads
+        # Insert leads into the leads table
         inserted_leads = []
-        if final_leads:
+        if final_leads_for_insert:
             try:
                 # Add batch_id to all leads
-                for lead in final_leads:
+                for lead in final_leads_for_insert:
                     lead['uploadbatchid'] = batch_id
                 
-                result = db.insert_leads(final_leads)
+                result = db.insert_leads(final_leads_for_insert)
                 inserted_leads = result.get('data', [])
                 logger.info(f"Successfully inserted {len(inserted_leads)} leads")
             except Exception as e:
@@ -490,20 +501,38 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
                 })
                 raise
         
-        # Add DNC entries
-        if dnc_entries:
+        # Add DNC entries into the dnc_entries table
+        if dnc_leads_for_processing:
             try:
-                db.add_dnc_entries(dnc_entries)
-                logger.info(f"Added {len(dnc_entries)} DNC entries")
+                dnc_entries_to_insert = []
+                # First ensure we have a default DNC list
+                dnc_list = db.get_or_create_dnc_list("Default DNC List", "email")
+                
+                for lead in dnc_leads_for_processing:
+                    dnc_entry = {
+                        'value': lead.get('email', '') or lead.get('phone', ''), # Use email or phone for DNC value
+                        'valuetype': 'email' if lead.get('email') else 'phone', # Determine type based on what's available
+                        'source': request.source,
+                        'reason': 'User marked as DNC' if lead.get('dnc', '').upper() == 'Y' else 'Unknown',
+                        'dnclistid': dnc_list['id'],
+                        'createdat': datetime.now(timezone.utc).isoformat()
+                    }
+                    # Only add if value is not empty
+                    if dnc_entry['value']:
+                        dnc_entries_to_insert.append(dnc_entry)
+
+                if dnc_entries_to_insert:
+                    db.add_dnc_entries(dnc_entries_to_insert)
+                    logger.info(f"Added {len(dnc_entries_to_insert)} DNC entries")
             except Exception as e:
                 logger.error(f"Error adding DNC entries: {e}")
                 # Don't raise here, as leads were already inserted
-        
+
         # Update batch record with completion status
         try:
             db.update_batch_record(batch_id, {
                 'status': 'completed',
-                'dncmatches': len(dnc_entries),
+                'dncmatches': len(dnc_leads_for_processing), # Use the count of leads marked for DNC processing
                 'completedat': datetime.now(timezone.utc).isoformat(),
                 'processingprogress': 100
             })
@@ -519,7 +548,7 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
                 'total': len(cleaned_data),
                 'cleaned': len(unique_leads),
                 'duplicates': len(duplicates),
-                'dnc': len(dnc_entries),
+                'dnc': len(dnc_leads_for_processing), # Use the count of leads marked for DNC processing
                 'inserted': len(inserted_leads)
             },
             'batch_id': batch_id

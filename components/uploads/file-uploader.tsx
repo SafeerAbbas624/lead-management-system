@@ -941,7 +941,7 @@ export function FileUploader() {
                   <p className="text-2xl font-bold">{processingResult.stats.total}</p>
                 </div>
                 <div>
-                  <p className="text-sm font-medium">Successfully Imported</p>
+                  <p className="text-sm font-medium">Successfully Uploaded to Database</p>
                   <p className="text-2xl font-bold text-green-600">{processingResult.stats.inserted}</p>
                 </div>
                 <div>

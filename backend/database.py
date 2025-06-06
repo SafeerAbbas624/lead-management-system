@@ -1742,7 +1742,10 @@ class SupabaseClient:
             
         try:
             result = self.supabase.table("leads").insert(leads).execute()
-            return result
+            # Ensure the result data is returned in a dictionary with 'data' key
+            returned_data = {"data": result.data}
+            logger.info(f"insert_leads returning: {returned_data}")
+            return returned_data
         except Exception as e:
             logger.error(f"Error inserting leads: {e}")
             raise
