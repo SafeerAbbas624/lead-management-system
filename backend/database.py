@@ -13,20 +13,67 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class SupabaseClient:
-    def __init__(self):
+    def __init__(self, supabase_url: str = None, supabase_key: str = None):
         """
         Initialize the Supabase client.
+        
+        Args:
+            supabase_url: Supabase URL (optional, will use environment variable if not provided)
+            supabase_key: Supabase service role key (optional, will use environment variable if not provided)
         """
         try:
+            # Use provided credentials or fall back to environment variables
+            url = supabase_url or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+            key = supabase_key or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            
+            if not url or not key:
+                error_msg = "Missing Supabase URL or key. Please check your environment variables."
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+                
+            logger.info(f"Initializing Supabase client with URL: {url[:20]}...")
+            
             # Initialize Supabase client
-            self.supabase = create_client(
-                os.getenv("NEXT_PUBLIC_SUPABASE_URL", ""),
-                os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-            )
-            logger.info("Supabase client initialized successfully")
+            self.supabase = create_client(url, key)
+            
+            # Test the connection
+            try:
+                # Try a simple query to verify the connection
+                self.supabase.table('leads').select('id').limit(1).execute()
+                logger.info("Successfully connected to Supabase")
+            except Exception as e:
+                logger.error(f"Failed to connect to Supabase: {str(e)}")
+                self.supabase = None
+                raise
+                
         except Exception as e:
-            logger.warning(f"Supabase credentials not found. Using mock data.")
+            logger.error(f"Error initializing Supabase client: {str(e)}", exc_info=True)
             self.supabase = None
+    
+    def safe_execute(self, operation, *args, **kwargs):
+        """
+        Safely execute a database operation with error handling and logging.
+        
+        Args:
+            operation: The database operation to execute (a method of supabase client)
+            *args: Positional arguments to pass to the operation
+            **kwargs: Keyword arguments to pass to the operation
+            
+        Returns:
+            The result of the operation or None if it failed
+        """
+        if not self.supabase:
+            logger.error("Cannot execute operation: Supabase client not initialized")
+            return None
+            
+        try:
+            logger.debug(f"Executing operation: {operation.__name__} with args: {args}, kwargs: {kwargs}")
+            result = operation(*args, **kwargs)
+            logger.debug(f"Operation result: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Error executing {operation.__name__}: {str(e)}", exc_info=True)
+            raise
     
     # Upload Batch methods
     def get_upload_batch(self, batch_id: int) -> Dict[str, Any]:
@@ -1810,32 +1857,51 @@ class SupabaseClient:
             logger.error(f"Error getting lead by ID {lead_id}: {e}")
             return None
 
-    def add_single_lead(self, lead_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Add a single lead to the database."""
+    def add_lead(self, lead_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add a new lead to the database.
+        
+        Args:
+            lead_data: Lead data dictionary
+        
+        Returns:
+            Added lead data
+        """
         if self.supabase is None:
-            logger.warning("No Supabase client available. Simulating add lead.")
-            # Simulate successful insertion with a dummy ID and current timestamp
-            return {**lead_data, "id": 9999, "createdat": datetime.now(timezone.utc).isoformat()}
-            
+            logger.warning("No Supabase client available. Cannot add lead.")
+            return {}
+        
         try:
-            # Ensure createdat is set if not provided
-            if "createdat" not in lead_data:
-                 lead_data["createdat"] = datetime.now(timezone.utc).isoformat()
-                 
-            # Ensure updatedat is set to createdat on creation
-            if "updatedat" not in lead_data:
-                lead_data["updatedat"] = lead_data["createdat"]
-
+            # Check for duplicate email
+            if "email" in lead_data and lead_data["email"]:
+                existing_lead = self.supabase.table("leads").select("*").eq("email", lead_data["email"]).execute()
+                if existing_lead.data and len(existing_lead.data) > 0:
+                    raise ValueError(f"Lead with email {lead_data['email']} already exists")
+            
+            # Check DNC if phone is provided
+            if "phone" in lead_data and lead_data["phone"]:
+                # Check in dnc_entries table for phone numbers
+                dnc_check = self.supabase.table("dnc_entries").select("*").eq("value", lead_data["phone"]).eq("valuetype", "phone").execute()
+                if dnc_check.data and len(dnc_check.data) > 0:
+                    raise ValueError(f"Phone number {lead_data['phone']} is in DNC list")
+            
+            # Add createdat timestamp
+            lead_data["createdat"] = datetime.now(timezone.utc).isoformat()
+            
+            # Add the lead
             response = self.supabase.table("leads").insert(lead_data).execute()
-            if response.data:
-                logger.info(f"Successfully added lead with ID: {response.data[0].get('id')}")
-                return response.data[0]
-            else:
-                logger.error("Failed to add single lead: No data returned")
-                return None
+            
+            if not response.data:
+                raise Exception("No data returned from insert operation")
+                
+            return response.data[0]
+            
+        except ValueError as ve:
+            logger.error(f"Validation error adding lead: {str(ve)}")
+            raise
         except Exception as e:
-            logger.error(f"Error adding single lead: {e}")
-            return None
+            logger.error(f"Error adding single lead: {str(e)}")
+            raise
 
     def update_lead(self, lead_id: int, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update an existing lead in the database."""

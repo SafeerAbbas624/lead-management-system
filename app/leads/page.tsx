@@ -8,26 +8,45 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
-import { Download, Plus, Search } from "lucide-react";
+import { Download, Plus, Search, X } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { fetchLeads, addLead, editLead, changeLeadStatus, deleteLead, fetchLeadsWithSearch, Lead } from '@/services/leadService';
 
 export default function LeadsPage() {
   const [leads, setLeads] = React.useState<Lead[]>([]);
   const [addDialogOpen, setAddDialogOpen] = React.useState(false);
+  const [viewDialogOpen, setViewDialogOpen] = React.useState(false);
+  const [selectedLead, setSelectedLead] = React.useState<Lead | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = React.useState(false);
+  const [editingLead, setEditingLead] = React.useState<Lead | null>(null);
+  const [searchTerm, setSearchTerm] = React.useState("");
   const [newLead, setNewLead] = React.useState({
     email: "",
     firstname: "",
     lastname: "",
     phone: "",
     companyname: "",
-    leadstatus: ""
+    taxid: "",
+    address: "",
+    city: "",
+    state: "",
+    zipcode: "",
+    country: "",
+    leadsource: "",
+    leadstatus: "New",
+    leadscore: 0,
+    leadcost: 0,
+    exclusivity: false,
+    exclusivitynotes: ""
   });
-  const [searchTerm, setSearchTerm] = React.useState("");
+  
   const { toast } = useToast();
 
   React.useEffect(() => {
@@ -36,12 +55,9 @@ export default function LeadsPage() {
 
   const loadLeads = async () => {
     try {
-      let data: Lead[];
-      if (searchTerm) {
-        data = await fetchLeadsWithSearch(searchTerm);
-      } else {
-        data = await fetchLeads();
-      }
+      const data = searchTerm 
+        ? await fetchLeadsWithSearch(searchTerm) 
+        : await fetchLeads();
       setLeads(data);
     } catch (error) {
       console.error("Error loading leads:", error);
@@ -53,177 +69,195 @@ export default function LeadsPage() {
     }
   };
 
-  // --- Table Actions ---
-  const handleView = (lead: Lead) => {
-    console.log("View details clicked for lead ID:", lead.id);
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'new':
+        return 'bg-blue-100 text-blue-800';
+      case 'contacted':
+        return 'bg-purple-100 text-purple-800';
+      case 'qualified':
+        return 'bg-green-100 text-green-800';
+      case 'unqualified':
+        return 'bg-red-100 text-red-800';
+      case 'customer':
+        return 'bg-green-100 text-green-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
   };
 
-  const handleEdit = async (lead: Lead) => {
-    console.log("Edit lead clicked for lead ID:", lead.id);
+  const handleView = (lead: Lead) => {
+    setSelectedLead(lead);
+    setViewDialogOpen(true);
+  };
+
+  const handleViewClose = () => {
+    setViewDialogOpen(false);
+    setSelectedLead(null);
+  };
+
+  const handleEdit = (lead: Lead) => {
+    setEditingLead(lead);
+    setEditDialogOpen(true);
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editingLead) return;
+    
     try {
-      const res = await editLead(lead);
-      if (res) {
-        toast({
-          title: "Success",
-          description: "Lead updated successfully",
-        });
-        loadLeads();
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to update lead",
-          variant: "destructive",
-        });
-      }
+      const updatedLead = await editLead(editingLead);
+      setLeads(leads.map(l => l.id === updatedLead.id ? updatedLead : l));
+      setEditDialogOpen(false);
+      setEditingLead(null);
+      toast({
+        title: "Success",
+        description: "Lead updated successfully",
+      });
     } catch (error) {
-      console.error("Error editing lead:", error);
+      console.error("Error updating lead:", error);
       toast({
         title: "Error",
-        description: "Error updating lead",
+        description: "Failed to update lead",
         variant: "destructive",
       });
     }
   };
 
   const handleChangeStatus = async (lead: Lead, newStatus: string) => {
-    console.log("Change status clicked for lead ID:", lead.id);
     try {
-      const res = await changeLeadStatus(lead.id, newStatus);
-      if (res) {
-        toast({
-          title: "Success",
-          description: "Status updated successfully",
-        });
-        loadLeads();
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to update status",
-          variant: "destructive",
-        });
-      }
+      const updatedLead = await changeLeadStatus(lead.id, newStatus);
+      setLeads(leads.map(l => l.id === updatedLead.id ? updatedLead : l));
+      toast({
+        title: "Success",
+        description: `Lead status updated to ${newStatus}`,
+      });
     } catch (error) {
-      console.error("Error changing lead status:", error);
+      console.error("Error updating lead status:", error);
       toast({
         title: "Error",
-        description: "Error updating status",
+        description: "Failed to update lead status",
         variant: "destructive",
       });
     }
   };
 
   const handleDelete = async (lead: Lead) => {
-    console.log("Delete lead clicked for lead ID:", lead.id);
+    if (!confirm('Are you sure you want to delete this lead?')) return;
     try {
       await deleteLead(lead.id);
+      setLeads(leads.filter(l => l.id !== lead.id));
       toast({
         title: "Success",
         description: "Lead deleted successfully",
       });
-      loadLeads();
     } catch (error) {
       console.error("Error deleting lead:", error);
       toast({
         title: "Error",
-        description: "Error deleting lead",
+        description: "Failed to delete lead",
         variant: "destructive",
       });
     }
   };
 
-  // --- Add Lead ---
   const handleAddLeadOpen = () => {
-    console.log("Add lead button clicked - header");
-    setAddDialogOpen(true);
     setNewLead({
       email: "",
       firstname: "",
       lastname: "",
       phone: "",
       companyname: "",
-      leadstatus: ""
+      taxid: "",
+      address: "",
+      city: "",
+      state: "",
+      zipcode: "",
+      country: "",
+      leadsource: "",
+      leadstatus: "New",
+      leadscore: 0,
+      leadcost: 0,
+      exclusivity: false,
+      exclusivitynotes: ""
     });
+    setAddDialogOpen(true);
   };
 
   const handleAddLeadSave = async () => {
     try {
-      const res = await addLead(newLead);
-      if (res) {
-        toast({
-          title: "Success",
-          description: "Lead added successfully",
-        });
-        loadLeads();
-        setAddDialogOpen(false);
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to add lead",
-          variant: "destructive",
-        });
-      }
+      const createdLead = await addLead(newLead);
+      setLeads([...leads, createdLead]);
+      setAddDialogOpen(false);
+      toast({
+        title: "Success",
+        description: "Lead added successfully",
+      });
     } catch (error) {
       console.error("Error adding lead:", error);
       toast({
         title: "Error",
-        description: "Error adding lead",
+        description: "Failed to add lead",
         variant: "destructive",
       });
     }
   };
 
-  // --- Export ---
   const handleExport = () => {
     console.log("Export leads clicked");
     if (!leads.length) return;
+    
     const header = Object.keys(leads[0]);
     const csvRows = [header.join(",")];
+    
     for (const lead of leads) {
       const values = header.map((field) => {
-        const value = lead[field];
+        const value = lead[field as keyof typeof lead];
         return `"${(value != null ? value.toString() : "").replace(/"/g, '""')}"`;
       });
       csvRows.push(values.join(","));
     }
+    
     const csvString = csvRows.join("\n");
     const blob = new Blob([csvString], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-
+    
     const a = document.createElement("a");
     a.href = url;
-    a.download = "leads_export.csv";
+    a.download = `leads-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="container mx-auto py-10">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">Leads</h1>
-        <div className="flex gap-4">
-          <div className="relative">
-            <Search className="absolute left-2 top-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search leads (Name, Email, Phone, Tags)"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8"
-            />
-          </div>
+    <div className="space-y-4 p-4">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Leads</h1>
+        <div className="flex gap-2">
           <Button onClick={handleAddLeadOpen}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Lead
+            <Plus className="mr-2 h-4 w-4" /> Add Lead
           </Button>
           <Button variant="outline" onClick={handleExport}>
-            <Download className="mr-2 h-4 w-4" />
-            Export
+            <Download className="mr-2 h-4 w-4" /> Export
           </Button>
         </div>
       </div>
 
-      <LeadsTable
-        leads={leads}
-        onView={handleView}
+      <div className="relative">
+        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          type="search"
+          placeholder="Search leads..."
+          className="w-full pl-8"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+
+      <LeadsTable 
+        leads={leads} 
+        onView={handleView} 
         onEdit={handleEdit}
         onChangeStatus={handleChangeStatus}
         onDelete={handleDelete}
@@ -231,84 +265,488 @@ export default function LeadsPage() {
 
       {/* Add Lead Dialog */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Lead</DialogTitle>
+            <DialogTitle>Add New Lead</DialogTitle>
+            <DialogDescription>
+              Fill in the details below to add a new lead.
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="email" className="text-right">
-                Email
-              </Label>
-              <Input
-                id="email"
-                value={newLead.email}
-                onChange={(e) => setNewLead({ ...newLead, email: e.target.value })}
-                className="col-span-3"
-              />
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+            {/* Personal Information */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Personal Information</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="firstname">First Name</Label>
+                  <Input
+                    id="firstname"
+                    value={newLead.firstname}
+                    onChange={(e) => setNewLead({ ...newLead, firstname: e.target.value })}
+                    placeholder="John"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastname">Last Name</Label>
+                  <Input
+                    id="lastname"
+                    value={newLead.lastname}
+                    onChange={(e) => setNewLead({ ...newLead, lastname: e.target.value })}
+                    placeholder="Doe"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={newLead.email}
+                    onChange={(e) => setNewLead({ ...newLead, email: e.target.value })}
+                    placeholder="john.doe@example.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Phone</Label>
+                  <Input
+                    id="phone"
+                    value={newLead.phone}
+                    onChange={(e) => setNewLead({ ...newLead, phone: e.target.value })}
+                    placeholder="+1 (555) 123-4567"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="firstname" className="text-right">
-                First Name
-              </Label>
-              <Input
-                id="firstname"
-                value={newLead.firstname}
-                onChange={(e) => setNewLead({ ...newLead, firstname: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="lastname" className="text-right">
-                Last Name
-              </Label>
-              <Input
-                id="lastname"
-                value={newLead.lastname}
-                onChange={(e) => setNewLead({ ...newLead, lastname: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="phone" className="text-right">
-                Phone
-              </Label>
-              <Input
-                id="phone"
-                value={newLead.phone}
-                onChange={(e) => setNewLead({ ...newLead, phone: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="companyname" className="text-right">
-                Company
-              </Label>
-              <Input
-                id="companyname"
-                value={newLead.companyname}
-                onChange={(e) => setNewLead({ ...newLead, companyname: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="leadstatus" className="text-right">
-                Status
-              </Label>
-              <Input
-                id="leadstatus"
-                value={newLead.leadstatus}
-                onChange={(e) => setNewLead({ ...newLead, leadstatus: e.target.value })}
-                className="col-span-3"
-              />
+
+            {/* Company Information */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Company Information</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="companyname">Company Name</Label>
+                  <Input
+                    id="companyname"
+                    value={newLead.companyname}
+                    onChange={(e) => setNewLead({ ...newLead, companyname: e.target.value })}
+                    placeholder="Acme Inc."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="taxid">Tax ID</Label>
+                  <Input
+                    id="taxid"
+                    value={newLead.taxid}
+                    onChange={(e) => setNewLead({ ...newLead, taxid: e.target.value })}
+                    placeholder="12-3456789"
+                  />
+                </div>
+              </div>
+
+              <h3 className="text-lg font-medium mt-6">Address</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="address">Street Address</Label>
+                  <Input
+                    id="address"
+                    value={newLead.address}
+                    onChange={(e) => setNewLead({ ...newLead, address: e.target.value })}
+                    placeholder="123 Main St"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="city">City</Label>
+                    <Input
+                      id="city"
+                      value={newLead.city}
+                      onChange={(e) => setNewLead({ ...newLead, city: e.target.value })}
+                      placeholder="New York"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="state">State/Province</Label>
+                    <Input
+                      id="state"
+                      value={newLead.state}
+                      onChange={(e) => setNewLead({ ...newLead, state: e.target.value })}
+                      placeholder="NY"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="zipcode">ZIP/Postal Code</Label>
+                    <Input
+                      id="zipcode"
+                      value={newLead.zipcode}
+                      onChange={(e) => setNewLead({ ...newLead, zipcode: e.target.value })}
+                      placeholder="10001"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="country">Country</Label>
+                    <Input
+                      id="country"
+                      value={newLead.country}
+                      onChange={(e) => setNewLead({ ...newLead, country: e.target.value })}
+                      placeholder="United States"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-          <DialogFooter>
+
+          <div className="space-y-4 pt-4">
+            <h3 className="text-lg font-medium">Lead Information</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <Label htmlFor="leadsource">Lead Source</Label>
+                <select
+                  id="leadsource"
+                  value={newLead.leadsource}
+                  onChange={(e) => setNewLead({ ...newLead, leadsource: e.target.value })}
+                  className="w-full border rounded-md p-2"
+                >
+                  <option value="">Select a source</option>
+                  <option value="Website">Website</option>
+                  <option value="Referral">Referral</option>
+                  <option value="Social Media">Social Media</option>
+                  <option value="Email">Email</option>
+                  <option value="Phone">Phone</option>
+                  <option value="In Person">In Person</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="leadstatus">Status</Label>
+                <select
+                  id="leadstatus"
+                  value={newLead.leadstatus}
+                  onChange={(e) => setNewLead({ ...newLead, leadstatus: e.target.value })}
+                  className="w-full border rounded-md p-2"
+                >
+                  <option value="New">New</option>
+                  <option value="Contacted">Contacted</option>
+                  <option value="Qualified">Qualified</option>
+                  <option value="Unqualified">Unqualified</option>
+                  <option value="Customer">Customer</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="leadscore">Lead Score</Label>
+                <Input
+                  id="leadscore"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={newLead.leadscore}
+                  onChange={(e) => setNewLead({ ...newLead, leadscore: parseInt(e.target.value) || 0 })}
+                  placeholder="0-100"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="leadcost">Lead Cost ($)</Label>
+                <Input
+                  id="leadcost"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={newLead.leadcost}
+                  onChange={(e) => setNewLead({ ...newLead, leadcost: parseFloat(e.target.value) || 0 })}
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-4">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="exclusivity"
+                  checked={newLead.exclusivity}
+                  onChange={(e) => setNewLead({ ...newLead, exclusivity: e.target.checked })}
+                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <Label htmlFor="exclusivity">Exclusive Lead</Label>
+              </div>
+
+              {newLead.exclusivity && (
+                <div className="space-y-2">
+                  <Label htmlFor="exclusivitynotes">Exclusivity Notes</Label>
+                  <textarea
+                    id="exclusivitynotes"
+                    value={newLead.exclusivitynotes}
+                    onChange={(e) => setNewLead({ ...newLead, exclusivitynotes: e.target.value })}
+                    className="w-full border rounded-md p-2"
+                    rows={3}
+                    placeholder="Enter any exclusivity terms or notes..."
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="pt-6">
             <Button variant="outline" onClick={() => setAddDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleAddLeadSave}>Add</Button>
+            <Button onClick={handleAddLeadSave}>
+              <Plus className="mr-2 h-4 w-4" /> Add Lead
+            </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Lead Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Lead</DialogTitle>
+            <DialogDescription>
+              Update the lead details below.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+            {/* Personal Information */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Personal Information</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-firstname">First Name</Label>
+                  <Input
+                    id="edit-firstname"
+                    value={editingLead?.firstname || ''}
+                    onChange={(e) => setEditingLead(prev => prev ? {...prev, firstname: e.target.value} : null)}
+                    placeholder="John"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-lastname">Last Name</Label>
+                  <Input
+                    id="edit-lastname"
+                    value={editingLead?.lastname || ''}
+                    onChange={(e) => setEditingLead(prev => prev ? {...prev, lastname: e.target.value} : null)}
+                    placeholder="Doe"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-email">Email</Label>
+                  <Input
+                    id="edit-email"
+                    type="email"
+                    value={editingLead?.email || ''}
+                    onChange={(e) => setEditingLead(prev => prev ? {...prev, email: e.target.value} : null)}
+                    placeholder="john.doe@example.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-phone">Phone</Label>
+                  <Input
+                    id="edit-phone"
+                    value={editingLead?.phone || ''}
+                    onChange={(e) => setEditingLead(prev => prev ? {...prev, phone: e.target.value} : null)}
+                    placeholder="(123) 456-7890"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Company Information */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Company Information</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-company">Company Name</Label>
+                  <Input
+                    id="edit-company"
+                    value={editingLead?.companyname || ''}
+                    onChange={(e) => setEditingLead(prev => prev ? {...prev, companyname: e.target.value} : null)}
+                    placeholder="Acme Inc."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-status">Status</Label>
+                  <select
+                    id="edit-status"
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={editingLead?.leadstatus || 'New'}
+                    onChange={(e) => setEditingLead(prev => prev ? {...prev, leadstatus: e.target.value} : null)}
+                  >
+                    <option value="New">New</option>
+                    <option value="Contacted">Contacted</option>
+                    <option value="Qualified">Qualified</option>
+                    <option value="Unqualified">Unqualified</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-source">Lead Source</Label>
+                  <Input
+                    id="edit-source"
+                    value={editingLead?.leadsource || ''}
+                    onChange={(e) => setEditingLead(prev => prev ? {...prev, leadsource: e.target.value} : null)}
+                    placeholder="e.g. Website, Referral, etc."
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditSubmit}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Lead Dialog */}
+      <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          {selectedLead && (
+            <>
+              <DialogHeader>
+                <div className="flex items-center justify-between">
+                  <DialogTitle>Lead Details</DialogTitle>
+                  <Button variant="ghost" size="icon" onClick={handleViewClose}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </DialogHeader>
+              
+              <div className="space-y-6">
+                {/* Personal Information */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Personal Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">First Name</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.firstname || '-'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Last Name</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.lastname || '-'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Email</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.email || '-'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Phone</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.phone || '-'}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Company Information */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Company Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Company</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.companyname || '-'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Tax ID</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.taxid || '-'}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Address Information */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Address Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Address</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.address || '-'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">City</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.city || '-'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">State/Province</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.state || '-'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">ZIP/Postal Code</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.zipcode || '-'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Country</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.country || '-'}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Lead Information */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Lead Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Status</p>
+                      <Badge className={getStatusColor(selectedLead.leadstatus)}>
+                        {selectedLead.leadstatus}
+                      </Badge>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Lead Source</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.leadsource || '-'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Lead Score</p>
+                      <p className="mt-1 text-sm font-medium">{selectedLead.leadscore || '-'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Lead Cost</p>
+                      <p className="mt-1 text-sm font-medium">
+                        {selectedLead.leadcost ? `$${selectedLead.leadcost}` : '-'}
+                      </p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Exclusivity</p>
+                      <p className="mt-1 text-sm font-medium">
+                        {selectedLead.exclusivity ? 'Yes' : 'No'}
+                      </p>
+                    </div>
+                    {selectedLead.exclusivity && (
+                      <div className="p-4">
+                        <p className="text-sm font-medium text-muted-foreground">Exclusivity Notes</p>
+                        <p className="mt-1 text-sm font-medium">
+                          {selectedLead.exclusivitynotes || '-'}
+                        </p>
+                      </div>
+                    )}
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Created At</p>
+                      <p className="mt-1 text-sm font-medium">
+                        {selectedLead.createdat ? new Date(selectedLead.createdat).toLocaleString() : '-'}
+                      </p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm font-medium text-muted-foreground">Last Updated</p>
+                      <p className="mt-1 text-sm font-medium">
+                        {selectedLead.updatedat ? new Date(selectedLead.updatedat).toLocaleString() : '-'}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

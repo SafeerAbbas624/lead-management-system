@@ -411,36 +411,178 @@ async def handle_process_leads(request: ProcessLeadsRequest) -> Dict[str, Any]:
                     duplicates.append(lead)
                 else:
                     # Separate leads marked as DNC for dnc_entries table
-                    if lead.get('dnc', '').upper() == 'Y':
+                    dnc_status = lead.get('dnc') or lead.get('is_dnc', '')
+                    if str(dnc_status).upper() in ['Y', 'YES', 'TRUE']:
                         dnc_leads_for_processing.append(lead)
                     
                     # Prepare lead data according to leads table schema
-                    lead_to_insert = {
-                        'email': lead.get('email'),
-                        'firstname': lead.get('firstname'),
-                        'lastname': lead.get('lastname'),
-                        'phone': lead.get('phone'),
-                        'companyname': lead.get('companyname'),
-                        'taxid': lead.get('taxid'), # Added taxid
-                        'address': lead.get('address'), # Added address
-                        'city': lead.get('city'), # Added city
-                        'state': lead.get('state'), # Added state
-                        'zipcode': lead.get('zipcode'), # Added zipcode
-                        'country': lead.get('country'), # Added country
-                        'leadsource': request.source,
-                        'leadstatus': 'new',
-                        'leadscore': lead.get('leadscore', 0), # Added leadscore
-                        'leadcost': lead.get('leadcost', 0), # Added leadcost
-                        'exclusivity': lead.get('exclusivity', False), # Added exclusivity
-                        'exclusivitynotes': lead.get('exclusivitynotes'), # Added exclusivitynotes
-                        'metadata': {
-                            'revenue': lead.get('revenue', 0),
-                            # Include other potential metadata fields here if needed
-                            **{k: v for k, v in lead.items() if k not in ['email', 'firstname', 'lastname', 'phone', 'companyname', 'taxid', 'address', 'city', 'state', 'zipcode', 'country', 'leadsource', 'leadstatus', 'leadscore', 'leadcost', 'exclusivity', 'exclusivitynotes', 'dnc']}
-                        },
-                        'tags': lead.get('tags', []), # Added tags
-                        'createdat': datetime.now(timezone.utc).isoformat()
+                    # Debug: Log the raw lead data
+                    logger.info(f"Processing lead with raw data: {lead}")
+                    
+                    # First, normalize field names to handle different cases and variations
+                    field_mapping = {
+                        'email': ['email', 'e-mail'],
+                        'firstname': ['firstname', 'first_name', 'fname', 'first name'],
+                        'lastname': ['lastname', 'last_name', 'lname', 'last name'],
+                        'phone': ['phone', 'phone1', 'phone_number', 'phone number', 'tel', 'telephone','mobile', 'cell', 'cellphone', 'cell phone',],
+                        'companyname': ['companyname', 'company_name', 'company', 'company name'],
+                        'taxid': ['taxid', 'tax_id', 'ein', 'tax id'],
+                        'address': ['address', 'address1', 'street', 'street_address', 'street address'],
+                        'city': ['city', 'City', 'City Name', 'city name', 'City Name', 'city name', 'City Name', 'city name'],
+                        'state': ['state', 'province', 'region'],
+                        'zipcode': ['zipcode', 'zip', 'postal_code', 'postalcode', 'postal code'],
+                        'country': ['country', 'nation'],
+                        'revenue': ['revenue', 'annual_revenue', 'income', 'annual revenue'],
+                        'phonetype': ['phonetype', 'phone_type', 'phone type'],
                     }
+                    
+                    # Create a case-insensitive mapping of the lead data
+                    lead_lower = {str(k).lower().strip(): v for k, v in lead.items() if v is not None and str(v).strip() != ''}
+                    
+                    # Debug: Log the case-insensitive keys we have
+                    logger.info(f"Available case-insensitive fields: {list(lead_lower.keys())}")
+                    
+                    # Special handling for address1 -> address mapping
+                    if 'address1' in lead_lower and 'address' not in lead_lower:
+                        lead_lower['address'] = lead_lower['address1']
+                    
+                    # Helper function to get value from lead using multiple possible field names
+                    def get_lead_value(field_names):
+                        if not isinstance(field_names, list):
+                            field_names = [field_names]
+                        for name in field_names:
+                            if name in lead_lower:
+                                return lead_lower[name]
+                            # Also check title case and lowercase versions
+                            title_name = name.title()
+                            if title_name in lead:
+                                return lead[title_name]
+                            if name in lead:
+                                return lead[name]
+                        return None
+                    
+                    # Build the lead data with proper field mapping
+                    logger.info("Field mapping results:")
+                    for field, value in [
+                        ('email', get_lead_value(field_mapping['email'])),
+                        ('firstname', get_lead_value(field_mapping['firstname'])),
+                        ('lastname', get_lead_value(field_mapping['lastname'])),
+                        ('phone', get_lead_value(field_mapping['phone'])),
+                        ('companyname', get_lead_value(field_mapping['companyname'])),
+                        ('address', get_lead_value(field_mapping['address'])),
+                        ('city', get_lead_value(field_mapping['city'])),
+                        ('state', get_lead_value(field_mapping['state'])),
+                        ('zipcode', get_lead_value(field_mapping['zipcode'])),
+                        ('country', get_lead_value(field_mapping['country']))
+                    ]:
+                        logger.info(f"  {field}: {value} (type: {type(value).__name__ if value else 'None'})")
+                    
+                    lead_to_insert = {
+                        'email': get_lead_value(field_mapping['email']),
+                        'firstname': get_lead_value(field_mapping['firstname']),
+                        'lastname': get_lead_value(field_mapping['lastname']),
+                        'phone': get_lead_value(field_mapping['phone']),
+                        'companyname': get_lead_value(field_mapping['companyname']),
+                        'taxid': get_lead_value(field_mapping['taxid']),
+                        'address': get_lead_value(field_mapping['address']),
+                        'city': get_lead_value(field_mapping['city']),
+                        'state': get_lead_value(field_mapping['state']),
+                        'zipcode': get_lead_value(field_mapping['zipcode']),
+                        'country': get_lead_value(field_mapping['country']),
+                        'leadsource': request.source,
+                        'leadstatus': 'New',
+                        'leadscore': int(get_lead_value('leadscore') or 0),
+                        'leadcost': float(get_lead_value('leadcost') or 0.0),
+                        'exclusivity': bool(str(get_lead_value('exclusivity') or '').lower() in ('true', 'yes', '1')),
+                        'exclusivitynotes': get_lead_value('exclusivitynotes'),
+                        'metadata': {}
+                    }
+                    
+                    # Define standard fields that go directly to lead columns
+                    standard_fields = [
+                        'email', 'firstname', 'lastname', 'phone', 'companyname',
+                        'taxid', 'address', 'city', 'state', 'zipcode', 'country',
+                        'leadsource', 'leadstatus', 'leadscore', 'leadcost',
+                        'exclusivity', 'exclusivitynotes', 'tags', 'dnc', 'is_dnc'
+                    ]
+                    
+                    # Debug: Log all fields that will go to metadata
+                    logger.info("Fields going to metadata:")
+                    for field, value in lead.items():
+                        if not value or str(value).strip() == '':
+                            continue
+                            
+                        # Check if this is a standard field we've already processed
+                        is_standard = any(
+                            field.lower() == std_field or 
+                            any(alt.lower() == field.lower() for alt in field_mapping.get(std_field, []))
+                            for std_field in standard_fields
+                        )
+                        
+                        if not is_standard:
+                            logger.info(f"  {field}: {value} (type: {type(value).__name__})")
+                    
+                    for field, value in lead.items():
+                        if not value or str(value).strip() == '':
+                            continue
+                            
+                        # Check if this is a standard field we've already processed
+                        is_standard = any(
+                            field.lower() == std_field or 
+                            any(alt.lower() == field.lower() for alt in field_mapping.get(std_field, []))
+                            for std_field in standard_fields
+                        )
+                        
+                        if not is_standard:
+                            lead_to_insert['metadata'][field] = str(value)
+                    
+                    # Handle DNC status in metadata
+                    dnc_status = get_lead_value(['dnc', 'is_dnc', 'do_not_call'])
+                    if dnc_status is not None:
+                        lead_to_insert['metadata']['dnc_status'] = str(dnc_status).upper()
+                    
+                    # Add phone type and revenue to metadata if they exist
+                    for field in ['phonetype', 'revenue']:
+                        value = get_lead_value(field)
+                        if value is not None:
+                            lead_to_insert['metadata'][field] = str(value)
+                    
+                    # Add tags and timestamps
+                    lead_to_insert['tags'] = lead.get('tags', []) or []  # Ensure tags is an array
+                    lead_to_insert['createdat'] = datetime.now(timezone.utc).isoformat()
+                    lead_to_insert['updatedat'] = datetime.now(timezone.utc).isoformat()
+                    
+                    # Clean up empty values
+                    lead_to_insert = {k: v for k, v in lead_to_insert.items() if v is not None and v != ''}
+                    
+                    # Ensure metadata is not empty (PostgreSQL doesn't like empty JSONB)
+                    if 'metadata' in lead_to_insert and not lead_to_insert['metadata']:
+                        lead_to_insert['metadata'] = None
+                    
+                    # Debug: Log the final lead data before insertion
+                    logger.info("Final lead data for insertion:")
+                    for field, value in lead_to_insert.items():
+                        if field == 'metadata' and value:
+                            logger.info(f"  {field}: {json.dumps(value, indent=2) if value else 'None'}")
+                        else:
+                            logger.info(f"  {field}: {value} (type: {type(value).__name__ if value else 'None'})")
+                    
+                    # Handle DNC status and other special fields in metadata
+                    dnc_status = lead.get('dnc') or lead.get('is_dnc')
+                    if dnc_status:
+                        lead_to_insert['metadata']['dnc_status'] = str(dnc_status).upper()
+                    
+                    # Add other specific fields to metadata if they exist
+                    for field in ['phonetype', 'revenue']:
+                        if field in lead and lead[field] is not None:
+                            lead_to_insert['metadata'][field] = str(lead[field])
+                    
+                    # Ensure metadata is not empty (PostgreSQL doesn't like empty JSONB)
+                    if not lead_to_insert['metadata']:
+                        lead_to_insert['metadata'] = None
+                    
+                    # Remove None values to avoid schema violations
+                    lead_to_insert = {k: v for k, v in lead_to_insert.items() if v is not None or k == 'metadata'}
 
                     if request.supplier_id:
                         lead_to_insert['supplierid'] = request.supplier_id

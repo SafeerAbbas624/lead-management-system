@@ -49,16 +49,14 @@ export function Sidebar({ className }: SidebarProps) {
   const pathname = usePathname()
 
   return (
-    <div className={cn("pb-12 border-r min-h-screen", className)}>
+    <div className={cn("pb-12 border-r min-h-screen w-64", className)}>
       <div className="space-y-4 py-4">
         <div className="px-4 py-2">
           <h2 className="mb-2 px-2 text-xl font-semibold tracking-tight">Lead Management</h2>
           <div className="space-y-1">
             <NavItem href="/dashboard" icon={<Home />} label="Dashboard" pathname={pathname} />
             <NavItem href="/leads" icon={<FileText />} label="Leads" pathname={pathname} />
-            <NavItem href="/leads/tagging" icon={<Tag />} label="Lead Tagging" pathname={pathname} />
             <NavItem href="/uploads" icon={<Upload />} label="Upload Leads" pathname={pathname} />
-            <NavItem href="/data-processing" icon={<Database />} label="Data Processing" pathname={pathname} />
             <NavItem href="/dnc-lists" icon={<Shield />} label="DNC Lists" pathname={pathname} />
             <NavItem href="/distribution" icon={<Share2 />} label="Lead Distribution" pathname={pathname} />
             <NavItem href="/roi-dashboard" icon={<BarChart3 />} label="ROI Dashboard" pathname={pathname} />
