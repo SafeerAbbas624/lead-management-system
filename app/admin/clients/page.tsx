@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Plus, Search, Building2, Users, DollarSign, TrendingUp } from "lucide-react"
+import { Plus, Search, Building2, Users, DollarSign, TrendingUp, Upload } from "lucide-react"
 import { Client } from "@/types/client"
 import { ClientDialog } from "@/app/components/clients/client-dialog"
 import { ClientCard } from "@/app/components/clients/client-card"
@@ -16,8 +16,9 @@ export default function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null)
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [activeTab, setActiveTab] = useState('form');
   const router = useRouter()
 
   useEffect(() => {
@@ -32,7 +33,8 @@ export default function ClientsPage() {
         throw new Error('Failed to fetch clients')
       }
       const data = await response.json()
-      setClients(data.data || [])
+      console.log('Fetched clients:', data) // Debug log
+      setClients(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error("Error fetching clients:", error)
       toast({
@@ -45,32 +47,116 @@ export default function ClientsPage() {
     }
   }
 
-  const handleSaveClient = async (data: Client) => {
-    try {
-      const method = selectedClient ? 'PUT' : 'POST'
-      const url = selectedClient 
-        ? `/api/clients/${selectedClient.id}` 
-        : '/api/clients'
+  type ClientFormData = {
+    name: string;
+    email: string;
+    phone?: string | null;
+    contactperson?: string | null;
+    deliveryformat?: string | null;
+    deliveryschedule?: string | null;
+    percentallocation?: number | null;
+    fixedallocation?: number | null;
+    exclusivitysettings?: Record<string, any> | null;
+    isactive: boolean;
+  };
+  
+  const mapClientToFormData = (client: Client | null): ClientFormData => ({
+    name: client?.name || '',
+    email: client?.email || '',
+    phone: client?.phone || null,
+    contactperson: client?.contactperson || null,
+    deliveryformat: client?.deliveryformat || null,
+    deliveryschedule: client?.deliveryschedule || null,
+    percentallocation: client?.percentallocation || null,
+    fixedallocation: client?.fixedallocation || null,
+    exclusivitysettings: client?.exclusivitysettings || null,
+    isactive: client?.isactive ?? true,
+  });
 
-      const response = await fetch(url, {
-        method,
+  // Function to create a new client
+  const createClient = async (clientData: Omit<Client, 'id' | 'createdat'>) => {
+    const dataWithTimestamp = {
+      ...clientData,
+      createdat: new Date().toISOString(), // Add current timestamp
+    };
+
+    const response = await fetch('/api/clients', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(dataWithTimestamp),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || errorData.message || 'Failed to create client');
+    }
+
+    return response.json();
+  };
+
+  // Function to update an existing client
+  const updateClient = async (id: number, data: Partial<Client>) => {
+    try {
+      const response = await fetch(`/api/clients?id=${id}`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(data),
-      })
+      });
 
       if (!response.ok) {
-        throw new Error(`Failed to ${selectedClient ? 'update' : 'create'} client`)
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.message || 'Failed to update client');
       }
 
-      await fetchClients()
-      toast({
-        title: "Success",
-        description: `Client ${selectedClient ? 'updated' : 'created'} successfully`,
-      })
+      return await response.json();
     } catch (error) {
-      console.error('Error saving client:', error)
+      console.error('Error updating client:', error);
+      throw error;
+    }
+  };
+
+  const handleSaveClient = async (formData: ClientFormData) => {
+    try {
+      // Convert form data to Client type
+      const clientData = {
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone?.trim() || null,
+        contactperson: formData.contactperson?.trim() || null,
+        deliveryformat: formData.deliveryformat?.trim() || null,
+        deliveryschedule: formData.deliveryschedule?.trim() || null,
+        percentallocation: formData.percentallocation ? Number(formData.percentallocation) : null,
+        fixedallocation: formData.fixedallocation ? Number(formData.fixedallocation) : null,
+        exclusivitysettings: formData.exclusivitysettings || null,
+        isactive: formData.isactive,
+      };
+
+      if (selectedClient && selectedClient.id) {
+        // Update existing client
+        await updateClient(selectedClient.id, clientData);
+        toast({
+          title: 'Success',
+          description: 'Client updated successfully',
+        });
+      } else {
+        // Create new client
+        await createClient(clientData);
+        toast({
+          title: 'Success',
+          description: 'Client created successfully',
+        });
+      }
+      
+      // Close the dialog and refresh the clients list
+      setIsDialogOpen(false);
+      await fetchClients();
+      setSelectedClient(null);
+    } catch (error) {
+      console.error(`Error ${selectedClient ? 'updating' : 'creating'} client:`, error)
       toast({
         title: "Error",
         description: `Failed to ${selectedClient ? 'update' : 'create'} client. Please try again.`,
@@ -79,16 +165,48 @@ export default function ClientsPage() {
     }
   }
 
+  const handleCSVUpload = async (file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/clients/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to upload CSV');
+      }
+
+      const result = await response.json();
+      
+      // Show success message
+      toast({
+        title: 'Success',
+        description: `Successfully imported ${result.count || 0} clients`,
+      });
+
+      // Refresh the clients list
+      await fetchClients();
+    } catch (error) {
+      console.error('Error uploading CSV:', error);
+      throw error; // Re-throw to be handled by the dialog
+    }
+  }
+
   const handleDelete = async (clientId: number) => {
     if (!confirm('Are you sure you want to delete this client?')) return
     
     try {
-      const response = await fetch(`/api/clients/${clientId}`, {
+      const response = await fetch(`/api/clients?id=${clientId}`, {
         method: 'DELETE',
       })
 
       if (!response.ok) {
-        throw new Error('Failed to delete client')
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.message || 'Failed to delete client');
       }
 
       await fetchClients()
@@ -100,7 +218,7 @@ export default function ClientsPage() {
       console.error('Error deleting client:', error)
       toast({
         title: "Error",
-        description: "Failed to delete client. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to delete client. Please try again.",
         variant: "destructive",
       })
     }
@@ -143,13 +261,42 @@ export default function ClientsPage() {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <Button onClick={() => {
-            setSelectedClient(null)
-            setIsDialogOpen(true)
-          }}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Client
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              variant="outline"
+              onClick={() => {
+                setSelectedClient(null);
+                setActiveTab('csv');
+                setIsDialogOpen(true);
+              }}
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Import CSV
+            </Button>
+            <ClientDialog
+              open={isDialogOpen}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setSelectedClient(null);
+                  setActiveTab('form');
+                }
+                setIsDialogOpen(open);
+              }}
+              client={selectedClient ? mapClientToFormData(selectedClient) : undefined}
+              onSave={handleSaveClient}
+              onCSVUpload={handleCSVUpload}
+              defaultTab={activeTab}
+            />
+            <Button 
+              onClick={() => {
+                setSelectedClient(null)
+                setIsDialogOpen(true)
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Client
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -226,18 +373,29 @@ export default function ClientsPage() {
               {filteredClients.map((client) => {
                 if (!client.id) return null; // Skip clients without an ID
                 
+                // Ensure all required fields have default values
+                const clientData = {
+                  id: client.id,
+                  name: client.name || 'Unnamed Client',
+                  email: client.email || '',
+                  phone: client.phone || null,
+                  contactperson: client.contactperson || null,
+                  deliveryformat: client.deliveryformat || null,
+                  deliveryschedule: client.deliveryschedule || null,
+                  percentallocation: client.percentallocation || null,
+                  fixedallocation: client.fixedallocation || null,
+                  exclusivitysettings: client.exclusivitysettings || null,
+                  isactive: client.isactive ?? true,
+                  createdat: client.createdat || new Date().toISOString(),
+                };
+                
                 return (
                   <ClientCard
                     key={client.id}
-                    client={{
-                      ...client,
-                      id: client.id,
-                      createdat: client.createdat || new Date().toISOString(),
-                      isactive: client.isactive ?? true
-                    }}
+                    client={clientData}
                     onEdit={() => {
-                      setSelectedClient(client)
-                      setIsDialogOpen(true)
+                      setSelectedClient(clientData);
+                      setIsDialogOpen(true);
                     }}
                     onDelete={() => client.id && handleDelete(client.id)}
                   />

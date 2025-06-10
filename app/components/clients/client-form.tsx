@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useForm, SubmitHandler } from 'react-hook-form';
+import * as React from 'react';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
@@ -15,21 +15,42 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { ClientFormData } from './client-dialog';
+
+// Type for form values matching the database schema
+type ClientFormValues = {
+  name: string;
+  email: string;
+  phone?: string | null;
+  contactperson?: string | null;
+  deliveryformat?: string | null;
+  deliveryschedule?: string | null;
+  percentallocation?: number | null;
+  fixedallocation?: number | null;
+  exclusivitysettings?: Record<string, any> | null;
+  isactive: boolean;
+  createdat?: string; // Will be set on the server if not provided
+};
 
 const clientFormSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Invalid email address'),
-  phone: z.string().optional(),
-  contactperson: z.string().optional(),
-  deliveryformat: z.string().optional(),
-  deliveryschedule: z.string().optional(),
-  percentallocation: z.number().int().min(0).max(100).optional().nullable(),
-  fixedallocation: z.number().int().min(0).optional().nullable(),
+  phone: z.string().optional().nullable(),
+  contactperson: z.string().optional().nullable(),
+  deliveryformat: z.string().optional().nullable(),
+  deliveryschedule: z.string().optional().nullable(),
+  percentallocation: z.union([
+    z.number().int().nonnegative('Must be a non-negative integer').nullable(),
+    z.string().regex(/^\d*$/, 'Must be a number').transform(Number).nullable()
+  ]).optional().nullable(),
+  fixedallocation: z.union([
+    z.number().int().nonnegative('Must be a non-negative integer').nullable(),
+    z.string().regex(/^\d*$/, 'Must be a number').transform(Number).nullable()
+  ]).optional().nullable(),
   exclusivitysettings: z.record(z.any()).optional().nullable(),
   isactive: z.boolean().default(true),
+  createdat: z.string().optional() // Will be set on the server if not provided
 });
-
-type ClientFormData = z.infer<typeof clientFormSchema>;
 
 interface ClientFormProps {
   initialData?: ClientFormData;
@@ -43,35 +64,48 @@ export function ClientForm({
   onSubmit,
   onCancel,
   isLoading = false,
-}: ClientFormProps) {
-  const form = useForm<ClientFormData>({
+}: ClientFormProps): JSX.Element {
+  const form = useForm<ClientFormValues>({
     resolver: zodResolver(clientFormSchema),
     defaultValues: {
-      name: '',
-      email: '',
-      phone: '',
-      contactperson: '',
-      deliveryformat: '',
-      deliveryschedule: '',
-      percentallocation: null,
-      fixedallocation: null,
-      exclusivitysettings: {},
-      isactive: true,
-      ...initialData,
+      name: initialData?.name || "",
+      email: initialData?.email || "",
+      phone: initialData?.phone ?? "",
+      contactperson: initialData?.contactperson ?? "",
+      deliveryformat: initialData?.deliveryformat ?? "",
+      deliveryschedule: initialData?.deliveryschedule ?? "",
+      percentallocation: initialData?.percentallocation ?? 0,
+      fixedallocation: initialData?.fixedallocation ?? 0,
+      exclusivitysettings: initialData?.exclusivitysettings ?? {},
+      isactive: initialData?.isactive ?? true,
     },
   });
 
-  const handleSubmit: SubmitHandler<ClientFormData> = async (data) => {
-    await onSubmit({
-      ...data,
-      percentallocation: data.percentallocation ? Number(data.percentallocation) : null,
-      fixedallocation: data.fixedallocation ? Number(data.fixedallocation) : null,
-    });
-  };
+  const handleSubmit = form.handleSubmit(async (formData) => {
+    try {
+      // Convert form data to match the expected type
+      const data: ClientFormData = {
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone || null,
+        contactperson: formData.contactperson || null,
+        deliveryformat: formData.deliveryformat || null,
+        deliveryschedule: formData.deliveryschedule || null,
+        percentallocation: formData.percentallocation ? Number(formData.percentallocation) : null,
+        fixedallocation: formData.fixedallocation ? Number(formData.fixedallocation) : null,
+        exclusivitysettings: formData.exclusivitysettings || null,
+        isactive: formData.isactive,
+      };
+      
+      await onSubmit(data);
+    } catch (error) {
+      console.error('Error submitting form:', error);
+    }
+  });
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <FormField
             control={form.control}

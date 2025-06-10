@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import List, Optional
-from pydantic import BaseModel, EmailStr, Field
-from datetime import datetime
+from fastapi import APIRouter, HTTPException, Depends, Query, Body
+from typing import List, Optional, Any
+from pydantic import BaseModel, EmailStr, Field, validator
+from datetime import datetime, timezone
 from supabase import create_client, Client
 import os
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -72,7 +73,8 @@ async def get_clients(
     
     try:
         response = query.execute()
-        return response.data
+        # Return the data in the expected format
+        return response.data if response.data else []
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -94,13 +96,69 @@ async def create_client(client: ClientCreate):
         if existing.data:
             raise HTTPException(status_code=400, detail="Client with this email already exists")
         
-        # Prepare data for insertion
-        client_data = client.dict(exclude_unset=True, by_alias=True)
-        client_data["createdat"] = datetime.utcnow().isoformat()
+        # Get current timestamp in PostgreSQL compatible format
+        current_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f+00')
         
-        # Insert new client
-        response = supabase.table("clients").insert(client_data).execute()
-        return response.data[0]
+        # Prepare data for insertion with exact database column names
+        client_data = {
+            'name': client.name,
+            'email': client.email,
+            'phone': client.phone if client.phone is not None else None,
+            'contactperson': client.contact_person if client.contact_person is not None else None,
+            'deliveryformat': client.delivery_format if client.delivery_format is not None else None,
+            'deliveryschedule': client.delivery_schedule if client.delivery_schedule is not None else None,
+            'percentallocation': int(client.percent_allocation) if client.percent_allocation is not None else None,
+            'fixedallocation': int(client.fixed_allocation) if client.fixed_allocation is not None else None,
+            'exclusivitysettings': client.exclusivity_settings if client.exclusivity_settings is not None else {},
+            'isactive': bool(client.is_active) if client.is_active is not None else True,
+            'createdat': current_time  # Explicitly set the timestamp
+        }
+        
+        # Remove None values for nullable fields
+        client_data = {k: v for k, v in client_data.items() if v is not None or k in ['phone', 'contactperson', 'deliveryformat', 'deliveryschedule', 'percentallocation', 'fixedallocation', 'exclusivitysettings']}
+        
+        print("Inserting client data:", client_data)  # Debug log
+        
+        try:
+            # For debugging, print the exact data being sent
+            print("Final data being inserted:", client_data)
+            
+            # Convert the data to a format suitable for Supabase
+            insert_data = {k: v for k, v in client_data.items() if v is not None}
+            
+            # Add the createdat field with current timestamp
+            insert_data['createdat'] = 'now()'
+            
+            print("Inserting data:", insert_data)
+            
+            # Use the Supabase client to insert the data
+            response = supabase.table('clients').insert(insert_data).execute()
+            
+            print("Supabase response:", response)
+            
+            if not response.data:
+                error_msg = "No data returned from Supabase"
+                if hasattr(response, 'error') and response.error:
+                    error_msg = str(response.error)
+                print(f"Supabase error: {error_msg}")
+                raise Exception(error_msg)
+                
+            # Return the inserted data
+            return response.data[0] if isinstance(response.data, list) else response.data
+            
+        except Exception as e:
+            print(f"Error in create_client: {str(e)}")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error args: {e.args}")
+            
+            # Try to get more detailed error information
+            import traceback
+            traceback.print_exc()
+            
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create client: {str(e)}"
+            )
     except HTTPException:
         raise
     except Exception as e:
@@ -134,3 +192,38 @@ async def delete_client(client_id: int):
         return None
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/bulk", response_model=List[ClientInDB], status_code=201)
+async def create_clients_bulk(clients: List[ClientCreate]):
+    try:
+        if not clients:
+            raise HTTPException(status_code=400, detail="No clients provided")
+        
+        # Prepare data for insertion
+        clients_data = []
+        for client in clients:
+            # Check if client with email already exists
+            existing = supabase.table("clients").select("id").eq("email", client.email).execute()
+            if existing.data:
+                continue  # Skip existing emails
+                
+            client_data = client.dict(exclude_unset=True, by_alias=True)
+            client_data["createdat"] = datetime.utcnow().isoformat()
+            clients_data.append(client_data)
+        
+        if not clients_data:
+            raise HTTPException(status_code=400, detail="All clients already exist")
+        
+        # Insert new clients in batches
+        BATCH_SIZE = 50
+        results = []
+        for i in range(0, len(clients_data), BATCH_SIZE):
+            batch = clients_data[i:i+BATCH_SIZE]
+            response = supabase.table("clients").insert(batch).execute()
+            results.extend(response.data)
+        
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create clients: {str(e)}")
