@@ -134,31 +134,43 @@ A comprehensive lead management system built with Next.js, FastAPI, and Supabase
   - Data backup and recovery
   - GDPR compliance tools
 
-## Tech Stack
+## 🛠 Tech Stack
 
 ### Frontend
 - **Framework**: Next.js 14 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS + Shadcn UI
-- **State Management**: React Query
-- **Data Visualization**: Recharts
-- **Form Handling**: React Hook Form
+- **State Management**: React Query, React Hook Form
+- **Data Visualization**: Recharts, React Day Picker
+- **Form Handling**: React Hook Form with Zod validation
 - **Icons**: Lucide React
+- **UI Components**: Radix UI Primitives
+- **Notifications**: Sonner
+- **Error Handling**: React Error Boundary
 
 ### Backend
 - **Framework**: FastAPI
 - **Language**: Python 3.11+
 - **Authentication**: Supabase Auth
 - **API Documentation**: OpenAPI (Swagger)
+- **Data Validation**: Pydantic
 
 ### Database
 - **Primary**: Supabase (PostgreSQL)
 - **ORMs**: Supabase Client, SQLAlchemy
+- **Migrations**: Alembic
+
+### Data Processing
+- **File Parsing**: XLSX, PapaParse, csv-parse
+- **Date Handling**: date-fns, date-fns-tz
 
 ### DevOps
 - **Version Control**: Git
 - **Package Manager**: pnpm
 - **Environment Management**: .env files
+- **Linting**: ESLint
+- **Formatting**: Prettier
+- **Type Checking**: TypeScript
 
 ## Prerequisites
 
