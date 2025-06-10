@@ -9,6 +9,7 @@ import { Header } from "@/components/layout/header"
 import { AuthProvider } from "@/lib/auth-context"
 import { usePathname } from "next/navigation"
 import { useEffect } from "react"
+import { QueryProvider } from "@/components/providers/query-provider"
 
 export default function ClientLayout({
   children,
@@ -28,18 +29,20 @@ export default function ClientLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen bg-background font-sans antialiased">
-        <AuthProvider>
-          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-            <div className="relative flex min-h-screen flex-col">
-              {!isHomePage && <Header />}
-              <div className="flex flex-1">
-                {showSidebar && <Sidebar className="hidden md:block" />}
-                <main className={`flex-1 ${showSidebar ? "p-6" : "p-0"}`}>{children}</main>
+        <QueryProvider>
+          <AuthProvider>
+            <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+              <div className="relative flex min-h-screen flex-col">
+                {!isHomePage && <Header />}
+                <div className="flex flex-1">
+                  {showSidebar && <Sidebar className="hidden md:block" />}
+                  <main className={`flex-1 ${showSidebar ? "p-6" : "p-0"}`}>{children}</main>
+                </div>
               </div>
-            </div>
-            <Toaster />
-          </ThemeProvider>
-        </AuthProvider>
+              <Toaster />
+            </ThemeProvider>
+          </AuthProvider>
+        </QueryProvider>
       </body>
     </html>
   )

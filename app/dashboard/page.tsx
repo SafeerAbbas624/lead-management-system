@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import { Metadata } from "next"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { EnhancedDashboardStats } from "@/components/dashboard/enhanced-dashboard-stats"
@@ -6,6 +6,11 @@ import { RecentUploads } from "@/components/dashboard/recent-uploads"
 import { LeadsBySource } from "@/components/dashboard/leads-by-source"
 import { LeadsByStatus } from "@/components/dashboard/leads-by-status"
 import { LeadTrendsChart } from "@/components/dashboard/lead-trends-chart"
+import { SourcePerformanceChart } from "@/components/dashboard/source-performance-chart"
+import { SupplierROIChart } from "@/components/dashboard/supplier-roi-chart"
+import { ConversionFunnel } from "@/components/dashboard/conversion-funnel"
+import { LeadQualityMetrics } from "@/components/dashboard/lead-quality-metrics"
+import { Reports } from "@/components/dashboard/reports"
 
 export const metadata: Metadata = {
   title: "Dashboard | Lead Management System",
@@ -67,72 +72,20 @@ export default function DashboardPage() {
           <LeadTrendsChart />
 
           <div className="grid gap-6 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Source Performance</CardTitle>
-                <CardDescription>Performance metrics by lead source</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[400px] flex items-center justify-center border rounded-md">
-                  <p className="text-muted-foreground">Source performance chart coming soon</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Supplier ROI</CardTitle>
-                <CardDescription>Return on investment by supplier</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[400px] flex items-center justify-center border rounded-md">
-                  <p className="text-muted-foreground">Supplier ROI chart coming soon</p>
-                </div>
-              </CardContent>
-            </Card>
+            <SourcePerformanceChart />
+            <SupplierROIChart />
           </div>
         </TabsContent>
 
         <TabsContent value="performance" className="space-y-6">
           <div className="grid gap-6 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Conversion Funnel</CardTitle>
-                <CardDescription>Lead conversion stages and drop-off rates</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[400px] flex items-center justify-center border rounded-md">
-                  <p className="text-muted-foreground">Conversion funnel coming soon</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Quality Metrics</CardTitle>
-                <CardDescription>Lead quality and validation metrics</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[400px] flex items-center justify-center border rounded-md">
-                  <p className="text-muted-foreground">Quality metrics coming soon</p>
-                </div>
-              </CardContent>
-            </Card>
+            <ConversionFunnel />
+            <LeadQualityMetrics />
           </div>
         </TabsContent>
 
         <TabsContent value="reports" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Automated Reports</CardTitle>
-              <CardDescription>Schedule and manage automated reports</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[400px] flex items-center justify-center border rounded-md">
-                <p className="text-muted-foreground">Reports dashboard coming soon</p>
-              </div>
-            </CardContent>
-          </Card>
+          <Reports />
         </TabsContent>
       </Tabs>
     </div>

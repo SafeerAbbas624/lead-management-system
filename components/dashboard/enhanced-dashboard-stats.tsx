@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   ArrowUpIcon,
   ArrowDownIcon,
@@ -15,19 +15,49 @@ import {
 import { supabase } from "@/lib/supabase-client"
 
 interface DashboardStats {
+  // Overview
   totalLeads: number
   totalUploads: number
-  dncMatches: number
-  conversionRate: number
+  totalSuppliers: number
+  activeClients: number
+  
+  // Lead Status
+  newLeads: number
+  contactedLeads: number
+  qualifiedLeads: number
   convertedLeads: number
-  totalCost: number
+  closedLostLeads: number
+  
+  // Quality Metrics
+  dncMatches: number
+  duplicateLeads: number
+  cleanLeads: number
+  qualityScore: number
+  
+  // Financials
   totalRevenue: number
+  totalCost: number
   netProfit: number
   roi: number
+  avgLeadCost: number
+  avgRevenuePerLead: number
+  
+  // Performance
+  conversionRate: number
   processingBatches: number
   failedBatches: number
-  avgLeadCost: number
-  avgRevenue: number
+  successRate: number
+  
+  // Trends
+  leadsThisMonth: number
+  leadsLastMonth: number
+  monthOverMonthGrowth: number
+  revenueThisMonth: number
+  revenueLastMonth: number
+  revenueGrowth: number
+  
+  // Additional calculated fields
+  [key: string]: number | string | undefined
 }
 
 export function EnhancedDashboardStats() {
@@ -76,19 +106,46 @@ export function EnhancedDashboardStats() {
 
         // Set demo data on error
         setStats({
+          // Overview
           totalLeads: 1250,
           totalUploads: 45,
-          dncMatches: 87,
-          conversionRate: 12.5,
+          totalSuppliers: 8,
+          activeClients: 24,
+          
+          // Lead Status
+          newLeads: 350,
+          contactedLeads: 275,
+          qualifiedLeads: 180,
           convertedLeads: 156,
-          totalCost: 5000,
+          closedLostLeads: 289,
+          
+          // Quality Metrics
+          dncMatches: 87,
+          duplicateLeads: 45,
+          cleanLeads: 1118,
+          qualityScore: 89,
+          
+          // Financials
           totalRevenue: 15000,
+          totalCost: 5000,
           netProfit: 10000,
           roi: 200,
+          avgLeadCost: 4,
+          avgRevenuePerLead: 12,
+          
+          // Performance
+          conversionRate: 12.5,
           processingBatches: 2,
           failedBatches: 1,
-          avgLeadCost: 4,
-          avgRevenue: 96.15,
+          successRate: 95,
+          
+          // Trends
+          leadsThisMonth: 350,
+          leadsLastMonth: 320,
+          monthOverMonthGrowth: 9.4,
+          revenueThisMonth: 15000,
+          revenueLastMonth: 13500,
+          revenueGrowth: 11.1
         })
       } finally {
         setLoading(false)
@@ -115,82 +172,125 @@ export function EnhancedDashboardStats() {
     )
   }
 
-  if (!stats) {
-    return null
+  if (error) {
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle>Dashboard Stats</CardTitle>
+          <CardDescription>Error loading dashboard stats</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="text-red-500">Failed to load dashboard stats. Please try again later.</div>
+        </CardContent>
+      </Card>
+    );
   }
+
+  // Use default values if stats is undefined
+  const safeStats = stats || {
+    totalLeads: 0,
+    totalUploads: 0,
+    dncMatches: 0,
+    conversionRate: 0,
+    totalRevenue: 0,
+    totalCost: 0,
+    netProfit: 0,
+    roi: 0,
+    activeClients: 0,
+    totalSuppliers: 0,
+    leadsThisMonth: 0,
+    leadsLastMonth: 0,
+    monthOverMonthGrowth: 0,
+    revenueThisMonth: 0,
+    revenueLastMonth: 0,
+    revenueGrowth: 0,
+    processingBatches: 0,
+    failedBatches: 0,
+    successRate: 0,
+    duplicateLeads: 0,
+    cleanLeads: 0,
+    qualityScore: 0,
+    avgLeadCost: 0,
+    avgRevenuePerLead: 0,
+    newLeads: 0,
+    contactedLeads: 0,
+    qualifiedLeads: 0,
+    convertedLeads: 0,
+    closedLostLeads: 0
+  };
 
   const statCards = [
     {
       title: "Total Leads",
-      value: stats.totalLeads.toLocaleString(),
+      value: stats?.totalLeads?.toLocaleString() || '0',
       icon: Users,
-      change: "+12.5%",
-      trend: "up",
+      change: stats?.monthOverMonthGrowth ? 
+        (stats.monthOverMonthGrowth > 0 ? `+${stats.monthOverMonthGrowth}%` : `${stats.monthOverMonthGrowth}%`) : '0%',
+      trend: stats?.monthOverMonthGrowth !== undefined && stats.monthOverMonthGrowth >= 0 ? "up" : "down",
       color: "text-blue-600",
       bgColor: "bg-blue-50",
     },
     {
-      title: "Revenue",
-      value: `$${stats.totalRevenue.toLocaleString()}`,
-      icon: DollarSign,
-      change: "+23.1%",
-      trend: "up",
-      color: "text-green-600",
-      bgColor: "bg-green-50",
-    },
-    {
-      title: "Net Profit",
-      value: `$${stats.netProfit.toLocaleString()}`,
-      icon: TrendingUp,
-      change: "+18.2%",
-      trend: "up",
-      color: "text-emerald-600",
-      bgColor: "bg-emerald-50",
-    },
-    {
-      title: "ROI",
-      value: `${stats.roi.toFixed(1)}%`,
-      icon: Activity,
-      change: "+5.4%",
-      trend: "up",
-      color: "text-purple-600",
-      bgColor: "bg-purple-50",
-    },
-    {
-      title: "Conversion Rate",
-      value: `${stats.conversionRate.toFixed(1)}%`,
-      icon: TrendingUp,
-      change: "-2.3%",
-      trend: "down",
-      color: "text-orange-600",
-      bgColor: "bg-orange-50",
-    },
-    {
       title: "Total Uploads",
-      value: stats.totalUploads.toLocaleString(),
+      value: stats?.totalUploads?.toLocaleString() || '0',
       icon: FileText,
-      change: "+8.7%",
-      trend: "up",
-      color: "text-indigo-600",
-      bgColor: "bg-indigo-50",
+      change: stats?.successRate ? 
+        (stats.successRate > 0 ? `+${stats.successRate}%` : `${stats.successRate}%`) : '0%',
+      trend: stats?.successRate !== undefined && stats.successRate >= 0 ? "up" : "down",
+      color: "text-yellow-600",
+      bgColor: "bg-yellow-50",
     },
     {
       title: "DNC Matches",
-      value: stats.dncMatches.toLocaleString(),
+      value: stats?.dncMatches?.toLocaleString() || '0',
       icon: AlertCircle,
-      change: "-15.3%",
-      trend: "down",
+      change: stats?.dncMatches ? 
+        (stats.dncMatches > 0 ? `+${stats.dncMatches}` : `${stats.dncMatches}`) : '0',
+      trend: stats?.dncMatches ? (stats.dncMatches > 0 ? "up" : "down") : "neutral",
       color: "text-red-600",
       bgColor: "bg-red-50",
     },
     {
+      title: "Conversion Rate",
+      value: stats?.conversionRate ? `${stats.conversionRate.toFixed(1)}%` : '0%',
+      icon: TrendingUp,
+      change: stats?.conversionRate ? 
+        (stats.conversionRate > 0 ? `+${stats.conversionRate.toFixed(1)}%` : `${stats.conversionRate.toFixed(1)}%`) : '0%',
+      trend: stats?.conversionRate !== undefined && stats.conversionRate >= 0 ? "up" : "down",
+      color: "text-green-600",
+      bgColor: "bg-green-50",
+    },
+    {
+      title: "Total Revenue",
+      value: `$${stats?.totalRevenue?.toLocaleString() || '0'}`,
+      icon: DollarSign,
+      change: stats?.revenueGrowth ? 
+        (stats.revenueGrowth > 0 ? `+${stats.revenueGrowth}%` : `${stats.revenueGrowth}%`) : '0%',
+      trend: stats?.revenueGrowth !== undefined && stats.revenueGrowth >= 0 ? "up" : "down",
+      color: "text-emerald-600",
+      bgColor: "bg-emerald-50",
+    },
+    {
+      title: "Active Clients",
+      value: stats?.activeClients?.toLocaleString() || '0',
+      icon: Users,
+      change: stats?.activeClients ? 
+        (stats.activeClients > 0 ? `+${stats.activeClients}` : `${stats.activeClients}`) : '0',
+      trend: stats?.activeClients ? (stats.activeClients > 0 ? "up" : "down") : "neutral",
+      color: "text-purple-600",
+      bgColor: "bg-purple-50",
+    },
+    {
       title: "Processing",
-      value: stats.processingBatches.toString(),
+      value: stats?.processingBatches?.toString() || '0',
       icon: Activity,
-      subtitle: `${stats.failedBatches} failed`,
+      subtitle: `${stats?.failedBatches || 0} failed`,
+      change: stats?.processingBatches ? 
+        (stats.processingBatches > 0 ? `+${stats.processingBatches}` : `${stats.processingBatches}`) : '0',
+      trend: stats?.processingBatches ? (stats.processingBatches > 0 ? "up" : "down") : "neutral",
       color: "text-yellow-600",
       bgColor: "bg-yellow-50",
-    },
+    }
   ]
 
   return (

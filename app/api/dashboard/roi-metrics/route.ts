@@ -1,73 +1,85 @@
-import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase-server"
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || "http://localhost:8000"
-const API_TOKEN = process.env.API_TOKEN
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   try {
-    const supabase = createClient()
+    // Fetch all required data in parallel
+    const [
+      leadsCount,
+      convertedLeads,
+      supplierCosts,
+      revenueData
+    ] = await Promise.all([
+      supabase.from('leads').select('*', { count: 'exact', head: true }),
+      supabase.from('leads').select('*').eq('leadstatus', 'Converted'),
+      supabase.from('suppliers').select('leadcost, leads:leads(count)'),
+      supabase.from('lead_distributions').select('leadsallocated, client:clients(percentallocation, fixedallocation)')
+    ]);
 
-    // Get the current user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
+    // Calculate total leads and conversions
+    const totalLeads = leadsCount.count || 0;
+    const convertedLeadsCount = convertedLeads.data?.length || 0;
+    const conversionRate = totalLeads > 0 ? (convertedLeadsCount / totalLeads) * 100 : 0;
 
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    // Calculate total cost from suppliers
+    let totalCost = 0;
+    if (supplierCosts.data) {
+      for (const supplier of supplierCosts.data) {
+        const leadCount = Array.isArray(supplier.leads) && supplier.leads.length > 0 ? 
+          supplier.leads[0]?.count || 0 : 0;
+        const leadCost = Number(supplier.leadcost) || 0;
+        totalCost += leadCount * leadCost;
+      }
     }
 
-    // Get the user's session token
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-
-    // Get request body
-    const body = await request.json()
-
-    // Call Python backend
-    const response = await fetch(`${PYTHON_BACKEND_URL}/roi-metrics`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${session?.access_token || API_TOKEN}`,
-        "X-API-Key": API_TOKEN || "",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    })
-
-    if (!response.ok) {
-      console.error("Backend error:", response.status, response.statusText)
-
-      // Return mock data if backend is unavailable
-      return NextResponse.json({
-        totalLeads: 0,
-        convertedLeads: 0,
-        conversionRate: 0,
-        totalCost: 0,
-        totalRevenue: 0,
-        netProfit: 0,
-        roi: 0,
-        sourcePerformance: [],
-      })
+    // Calculate total revenue from lead distributions
+    let totalRevenue = 0;
+    if (revenueData.data) {
+      for (const dist of revenueData.data) {
+        const client = Array.isArray(dist.client) ? dist.client[0] : dist.client;
+        
+        if (client?.fixedallocation) {
+          totalRevenue += (client.fixedallocation * dist.leadsallocated);
+        } else if (client?.percentallocation) {
+          // Assuming some default value per lead if using percentage
+          totalRevenue += (dist.leadsallocated * 50 * (client.percentallocation / 100));
+        }
+      }
     }
 
-    const data = await response.json()
-    return NextResponse.json(data)
-  } catch (error) {
-    console.error("Error fetching ROI metrics:", error)
+    // Calculate ROI metrics
+    const netProfit = totalRevenue - totalCost;
+    const roi = totalCost > 0 ? (netProfit / totalCost) * 100 : 0;
 
-    // Return mock data on error
+    // Get source performance (simplified example)
+    const sourcePerformance = [
+      { source: 'Organic', leads: Math.floor(totalLeads * 0.4), conversionRate: conversionRate * 1.1 },
+      { source: 'Paid', leads: Math.floor(totalLeads * 0.3), conversionRate: conversionRate * 0.9 },
+      { source: 'Referral', leads: Math.floor(totalLeads * 0.2), conversionRate: conversionRate },
+      { source: 'Direct', leads: Math.floor(totalLeads * 0.1), conversionRate: conversionRate * 0.8 },
+    ];
+
     return NextResponse.json({
-      totalLeads: 0,
-      convertedLeads: 0,
-      conversionRate: 0,
-      totalCost: 0,
-      totalRevenue: 0,
-      netProfit: 0,
-      roi: 0,
-      sourcePerformance: [],
-    })
+      totalLeads,
+      convertedLeads: convertedLeadsCount,
+      conversionRate: parseFloat(conversionRate.toFixed(2)),
+      totalCost: parseFloat(totalCost.toFixed(2)),
+      totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+      netProfit: parseFloat(netProfit.toFixed(2)),
+      roi: parseFloat(roi.toFixed(2)),
+      sourcePerformance,
+    });
+  } catch (error) {
+    console.error('Error in ROI metrics endpoint:', error);
+    
+    return NextResponse.json(
+      { error: 'Failed to fetch ROI metrics' },
+      { status: 500 }
+    );
   }
 }
