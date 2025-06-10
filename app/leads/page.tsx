@@ -17,10 +17,17 @@ import { useToast } from "@/components/ui/use-toast";
 import { Download, Plus, Search, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { fetchLeads, addLead, editLead, changeLeadStatus, deleteLead, fetchLeadsWithSearch, Lead } from '@/services/leadService';
+import { fetchLeads, addLead, editLead, changeLeadStatus, deleteLead, fetchLeadsWithSearch, Lead, PaginatedResponse } from '@/services/leadService';
 
 export default function LeadsPage() {
-  const [leads, setLeads] = React.useState<Lead[]>([]);
+  const [leadsData, setLeadsData] = React.useState<PaginatedResponse<Lead>>({
+    data: [],
+    total: 0,
+    page: 1,
+    pageSize: 10,
+    totalPages: 1
+  });
+  const [isLoading, setIsLoading] = React.useState(false);
   const [addDialogOpen, setAddDialogOpen] = React.useState(false);
   const [viewDialogOpen, setViewDialogOpen] = React.useState(false);
   const [selectedLead, setSelectedLead] = React.useState<Lead | null>(null);
@@ -53,12 +60,16 @@ export default function LeadsPage() {
     loadLeads();
   }, [searchTerm]);
 
-  const loadLeads = async () => {
+  const loadLeads = async (page: number = 1, search: string = searchTerm) => {
+    setIsLoading(true);
     try {
-      const data = searchTerm 
-        ? await fetchLeadsWithSearch(searchTerm) 
-        : await fetchLeads();
-      setLeads(data);
+      let response;
+      if (search && search.trim()) {
+        response = await fetchLeadsWithSearch(search.trim(), page, leadsData.pageSize);
+      } else {
+        response = await fetchLeads(page, leadsData.pageSize);
+      }
+      setLeadsData(response);
     } catch (error) {
       console.error("Error loading leads:", error);
       toast({
@@ -66,7 +77,18 @@ export default function LeadsPage() {
         description: "Failed to load leads",
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  const handlePageChange = (page: number) => {
+    loadLeads(page);
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    loadLeads(1, searchTerm);
   };
 
   const getStatusColor = (status: string) => {
@@ -106,7 +128,10 @@ export default function LeadsPage() {
     
     try {
       const updatedLead = await editLead(editingLead);
-      setLeads(leads.map(l => l.id === updatedLead.id ? updatedLead : l));
+      setLeadsData(prev => ({
+        ...prev,
+        data: prev.data.map(l => l.id === updatedLead.id ? updatedLead : l)
+      }));
       setEditDialogOpen(false);
       setEditingLead(null);
       toast({
@@ -126,7 +151,10 @@ export default function LeadsPage() {
   const handleChangeStatus = async (lead: Lead, newStatus: string) => {
     try {
       const updatedLead = await changeLeadStatus(lead.id, newStatus);
-      setLeads(leads.map(l => l.id === updatedLead.id ? updatedLead : l));
+      setLeadsData(prev => ({
+        ...prev,
+        data: prev.data.map(l => l.id === updatedLead.id ? updatedLead : l)
+      }));
       toast({
         title: "Success",
         description: `Lead status updated to ${newStatus}`,
@@ -145,7 +173,8 @@ export default function LeadsPage() {
     if (!confirm('Are you sure you want to delete this lead?')) return;
     try {
       await deleteLead(lead.id);
-      setLeads(leads.filter(l => l.id !== lead.id));
+      // Reload the current page to reflect the deletion
+      loadLeads(leadsData.page);
       toast({
         title: "Success",
         description: "Lead deleted successfully",
@@ -186,7 +215,8 @@ export default function LeadsPage() {
   const handleAddLeadSave = async () => {
     try {
       const createdLead = await addLead(newLead);
-      setLeads([...leads, createdLead]);
+      // Reload the current page to show the new lead
+      loadLeads(leadsData.page);
       setAddDialogOpen(false);
       toast({
         title: "Success",
@@ -204,12 +234,12 @@ export default function LeadsPage() {
 
   const handleExport = () => {
     console.log("Export leads clicked");
-    if (!leads.length) return;
+    if (!leadsData.data.length) return;
     
-    const header = Object.keys(leads[0]);
+    const header = Object.keys(leadsData.data[0]);
     const csvRows = [header.join(",")];
     
-    for (const lead of leads) {
+    for (const lead of leadsData.data) {
       const values = header.map((field) => {
         const value = lead[field as keyof typeof lead];
         return `"${(value != null ? value.toString() : "").replace(/"/g, '""')}"`;
@@ -244,24 +274,67 @@ export default function LeadsPage() {
         </div>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          type="search"
-          placeholder="Search leads..."
-          className="w-full pl-8"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-      </div>
+      <form onSubmit={handleSearch} className="flex gap-2 mb-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            type="search"
+            placeholder="Search leads..."
+            className="w-full pl-8"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <Button type="submit" disabled={isLoading}>
+          {isLoading ? 'Searching...' : 'Search'}
+        </Button>
+      </form>
 
-      <LeadsTable 
-        leads={leads} 
-        onView={handleView} 
-        onEdit={handleEdit}
-        onChangeStatus={handleChangeStatus}
-        onDelete={handleDelete}
-      />
+      <div className="space-y-4">
+        <div className="rounded-md border">
+          <LeadsTable 
+            leads={leadsData.data} 
+            onView={handleView} 
+            onEdit={handleEdit}
+            onChangeStatus={handleChangeStatus}
+            onDelete={handleDelete}
+            isLoading={isLoading}
+          />
+        </div>
+        
+        {leadsData.total > 0 && (
+          <div className="flex items-center justify-between px-2">
+            <div className="text-sm text-muted-foreground">
+              Showing <span className="font-medium">{(leadsData.page - 1) * leadsData.pageSize + 1}</span> to{' '}
+              <span className="font-medium">
+                {Math.min(leadsData.page * leadsData.pageSize, leadsData.total)}
+              </span>{' '}
+              of <span className="font-medium">{leadsData.total}</span> leads
+            </div>
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePageChange(leadsData.page - 1)}
+                disabled={leadsData.page === 1 || isLoading}
+              >
+                Previous
+              </Button>
+              <div className="text-sm">
+                Page {leadsData.page} of {leadsData.totalPages}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePageChange(leadsData.page + 1)}
+                disabled={leadsData.page >= leadsData.totalPages || isLoading}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Add Lead Dialog */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>

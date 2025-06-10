@@ -13,10 +13,48 @@ export interface Lead {
   [key: string]: any;
 }
 
-export const fetchLeads = async (): Promise<Lead[]> => {
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export const fetchLeads = async (page: number = 1, pageSize: number = 10): Promise<PaginatedResponse<Lead>> => {
   try {
-    const response = await axios.get(`${API_URL}/api/leads`);
-    return response.data;
+    const response = await axios.get(`${API_URL}/api/leads`, {
+      params: {
+        skip: (page - 1) * pageSize,
+        limit: pageSize
+      }
+    });
+    
+    // Debug log to check headers
+    console.log('Response headers:', response.headers);
+    
+    // Get pagination info from headers
+    const total = response.headers['x-total-count'] ? 
+      parseInt(response.headers['x-total-count']) : 
+      response.data.length;
+      
+    const totalPages = response.headers['x-total-pages'] ?
+      parseInt(response.headers['x-total-pages']) :
+      Math.ceil(total / pageSize);
+    
+    const currentPage = response.headers['x-current-page'] ?
+      parseInt(response.headers['x-current-page']) :
+      page;
+    
+    console.log('Pagination data:', { total, totalPages, currentPage, pageSize });
+    
+    return {
+      data: response.data,
+      total,
+      page: currentPage,
+      pageSize,
+      totalPages
+    };
   } catch (error) {
     console.error('Error fetching leads:', error);
     throw error;
@@ -62,12 +100,43 @@ export const deleteLead = async (leadId: number): Promise<void> => {
   }
 };
 
-export const fetchLeadsWithSearch = async (searchTerm: string): Promise<Lead[]> => {
+export const fetchLeadsWithSearch = async (searchTerm: string, page: number = 1, pageSize: number = 10): Promise<PaginatedResponse<Lead>> => {
   try {
-    const response = await axios.get(`${API_URL}/api/leads`, { params: { search: searchTerm } });
-    return response.data;
+    const response = await axios.get(`${API_URL}/api/leads`, { 
+      params: { 
+        search: searchTerm,
+        skip: (page - 1) * pageSize,
+        limit: pageSize
+      } 
+    });
+    
+    // Debug log to check headers
+    console.log('Search response headers:', response.headers);
+    
+    // Get pagination info from headers
+    const total = response.headers['x-total-count'] ? 
+      parseInt(response.headers['x-total-count']) : 
+      response.data.length;
+      
+    const totalPages = response.headers['x-total-pages'] ?
+      parseInt(response.headers['x-total-pages']) :
+      Math.ceil(total / pageSize);
+    
+    const currentPage = response.headers['x-current-page'] ?
+      parseInt(response.headers['x-current-page']) :
+      page;
+    
+    console.log('Search pagination data:', { total, totalPages, currentPage, pageSize });
+    
+    return {
+      data: response.data,
+      total,
+      page: currentPage,
+      pageSize,
+      totalPages
+    };
   } catch (error) {
     console.error('Error fetching leads with search:', error);
     throw error;
   }
-}; 
+};

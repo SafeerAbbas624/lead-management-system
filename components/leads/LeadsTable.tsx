@@ -18,7 +18,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MoreVertical, Eye, Pencil, Trash, X } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface Lead {
@@ -38,34 +37,25 @@ interface LeadsTableProps {
   onEdit: (lead: Lead) => void;
   onChangeStatus: (lead: Lead, newStatus: string) => void;
   onDelete: (lead: Lead) => void;
+  isLoading?: boolean;
 }
 
-export default function LeadsTable({ leads, onView, onEdit, onChangeStatus, onDelete }: LeadsTableProps) {
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-  const [viewDialogOpen, setViewDialogOpen] = useState(false);
-
-  const handleView = (lead: Lead) => {
-    setSelectedLead(lead);
-    setViewDialogOpen(true);
+export default function LeadsTable({ leads, onView, onEdit, onChangeStatus, onDelete, isLoading = false }: LeadsTableProps) {
+  const handleViewClick = (lead: Lead) => {
     onView(lead);
   };
 
-  const handleViewClose = () => {
-    setViewDialogOpen(false);
-    setSelectedLead(null);
-  };
-
-  const handleEdit = (lead: Lead) => {
+  const handleEditClick = (lead: Lead) => {
     console.log("Edit clicked for lead:", lead);
     onEdit(lead);
   };
 
-  const handleChangeStatus = (lead: Lead, newStatus: string) => {
+  const handleChangeStatusClick = (lead: Lead, newStatus: string) => {
     console.log("Change status clicked for lead:", lead, "to status:", newStatus);
     onChangeStatus(lead, newStatus);
   };
 
-  const handleDelete = (lead: Lead) => {
+  const handleDeleteClick = (lead: Lead) => {
     console.log("Delete clicked for lead:", lead);
     onDelete(lead);
   };
@@ -135,12 +125,6 @@ export default function LeadsTable({ leads, onView, onEdit, onChangeStatus, onDe
           <CardTitle className="text-lg">Lead Information</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-6">
-          <div className="p-4">
-            <p className="text-sm font-medium text-muted-foreground">Status</p>
-            <div className="mt-1">
-              {renderStatusBadge(lead.leadstatus)}
-            </div>
-          </div>
           {renderField('Lead Source', lead.leadsource)}
           {renderField('Lead Score', lead.leadscore)}
           {renderField('Lead Cost', lead.leadcost ? `$${lead.leadcost}` : null)}
@@ -181,7 +165,23 @@ export default function LeadsTable({ leads, onView, onEdit, onChangeStatus, onDe
             </TableRow>
           </TableHeader>
           <TableBody>
-            {leads.map((lead) => (
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center py-8">
+                  <div className="flex justify-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">Loading leads...</p>
+                </TableCell>
+              </TableRow>
+            ) : leads.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center py-8">
+                  <p className="text-muted-foreground">No leads found</p>
+                </TableCell>
+              </TableRow>
+            ) : (
+              leads.map((lead) => (
               <TableRow key={lead.id}>
                 <TableCell>{`${lead.firstname} ${lead.lastname}`}</TableCell>
                 <TableCell>{lead.email}</TableCell>
@@ -200,31 +200,34 @@ export default function LeadsTable({ leads, onView, onEdit, onChangeStatus, onDe
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleView(lead)}>
+                      <DropdownMenuItem onClick={() => handleViewClick(lead)}>
                         <Eye className="mr-2 h-4 w-4" />
-                        View Details
+                        View
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleEdit(lead)}>
+                      <DropdownMenuItem onClick={() => handleEditClick(lead)}>
                         <Pencil className="mr-2 h-4 w-4" />
                         Edit
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleChangeStatus(lead, 'new')}>
+                      <DropdownMenuItem onClick={() => handleChangeStatusClick(lead, 'New')}>
                         <Badge className="mr-2 bg-blue-500">New</Badge>
                         Mark as New
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleChangeStatus(lead, 'contacted')}>
+                      <DropdownMenuItem onClick={() => handleChangeStatusClick(lead, 'Contacted')}>
                         <Badge className="mr-2 bg-yellow-500">Contacted</Badge>
                         Mark as Contacted
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleChangeStatus(lead, 'qualified')}>
+                      <DropdownMenuItem onClick={() => handleChangeStatusClick(lead, 'Qualified')}>
                         <Badge className="mr-2 bg-green-500">Qualified</Badge>
                         Mark as Qualified
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleChangeStatus(lead, 'unqualified')}>
+                      <DropdownMenuItem onClick={() => handleChangeStatusClick(lead, 'Unqualified')}>
                         <Badge className="mr-2 bg-red-500">Unqualified</Badge>
                         Mark as Unqualified
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleDelete(lead)}>
+                      <DropdownMenuItem
+                        className="text-red-600"
+                        onClick={() => handleDeleteClick(lead)}
+                      >
                         <Trash className="mr-2 h-4 w-4" />
                         Delete
                       </DropdownMenuItem>
@@ -232,28 +235,11 @@ export default function LeadsTable({ leads, onView, onEdit, onChangeStatus, onDe
                   </DropdownMenu>
                 </TableCell>
               </TableRow>
-            ))}
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
-
-      {/* Lead Details Dialog */}
-      <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <div className="flex items-center justify-between">
-              <DialogTitle className="text-2xl">Lead Details</DialogTitle>
-              <Button variant="ghost" size="icon" onClick={handleViewClose} aria-label="Close">
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-          </DialogHeader>
-          <DialogDescription className="sr-only">
-            Detailed information about the selected lead
-          </DialogDescription>
-          {selectedLead && renderLeadDetails(selectedLead)}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, Body
+from fastapi import APIRouter, HTTPException, Depends, Query, Body, Response, status
 from typing import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, Field, validator, Json
 from datetime import datetime, timezone
@@ -16,6 +16,9 @@ router = APIRouter(prefix="/api/leads", tags=["leads"])
 db = SupabaseClient()
 
 # Pydantic models
+class LeadStatusUpdate(BaseModel):
+    leadstatus: str
+
 class LeadBase(BaseModel):
     email: Optional[str] = None
     firstname: Optional[str] = None
@@ -99,17 +102,22 @@ def format_lead(lead_data: Dict) -> Dict:
         
         # Handle datetime fields
         for date_field in ['createdat', 'updatedat']:
-            if date_field in formatted and formatted[date_field]:
-                if isinstance(formatted[date_field], str):
-                    try:
-                        # Try to parse the string to datetime and back to ISO format
+            if date_field in formatted:
+                if formatted[date_field] is None:
+                    continue
+                    
+                try:
+                    # If it's already a string in ISO format, ensure it's properly formatted
+                    if isinstance(formatted[date_field], str):
+                        # Try to parse and reformat to ensure consistency
                         dt = datetime.fromisoformat(formatted[date_field].replace('Z', '+00:00'))
                         formatted[date_field] = dt.isoformat()
-                    except (ValueError, AttributeError):
-                        formatted[date_field] = None
-                elif hasattr(formatted[date_field], 'isoformat'):
                     # Handle datetime objects
-                    formatted[date_field] = formatted[date_field].isoformat()
+                    elif hasattr(formatted[date_field], 'isoformat'):
+                        formatted[date_field] = formatted[date_field].isoformat()
+                except Exception as e:
+                    logger.warning(f"Error formatting {date_field}: {str(e)}")
+                    formatted[date_field] = None
         
         # Ensure metadata is a dict
         if 'metadata' in formatted:
@@ -153,7 +161,6 @@ def format_lead(lead_data: Dict) -> Dict:
             'error': f"Error formatting lead data: {str(e)}"
         }
 
-# API Endpoints
 @router.get("/", response_model=List[Dict[str, Any]])
 async def get_leads(
     skip: int = Query(0, ge=0),
@@ -162,40 +169,133 @@ async def get_leads(
     leadstatus: Optional[str] = None,
     leadsource: Optional[str] = None,
     clientid: Optional[int] = None,
-    supplierid: Optional[int] = None
+    supplierid: Optional[int] = None,
+    response: Response = None
 ):
-    """
-    Get a list of leads with optional filtering and pagination
-    """
+    # Set CORS headers
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Expose-Headers"] = "X-Total-Count, X-Page-Size, X-Current-Page, X-Total-Pages"
+    
+    # Initialize default values
+    leads = []
+    total_count = 0
+    total_pages = 0
+    current_page = 1
+    
     try:
+        # Build base query
         query = db.supabase.table('leads').select('*')
         
         # Apply filters
-        if search:
-            search_terms = search.split()
-            for term in search_terms:
-                query = query.or_(f"email.ilike.%{term}%,firstname.ilike.%{term}%,lastname.ilike.%{term}%,companyname.ilike.%{term}%")
-        
         if leadstatus:
             query = query.eq('leadstatus', leadstatus)
         if leadsource:
             query = query.eq('leadsource', leadsource)
-        if clientid:
+        if clientid is not None:
             query = query.eq('clientid', clientid)
-        if supplierid:
+        if supplierid is not None:
             query = query.eq('supplierid', supplierid)
         
-        # Apply pagination
-        query = query.range(skip, skip + limit - 1)
+        # Get total count
+        count_result = query.execute()
+        total_count = len(count_result.data) if hasattr(count_result, 'data') else 0
         
-        # Order by most recent first
+        # Apply sorting and pagination
         query = query.order('createdat', desc=True)
+        if limit > 0:
+            query = query.range(skip, skip + limit - 1)
         
+        # Execute query
         result = query.execute()
-        return [format_lead(lead) for lead in result.data if lead]
+        leads = result.data if hasattr(result, 'data') else []
+        
+        # Apply search filter if search term is provided
+        if search and leads:
+            search_terms = search.lower().split()
+            search_fields = ['firstname', 'lastname', 'email', 'phone', 'companyname', 'leadstatus', 'leadsource']
+            
+            def matches_search(lead):
+                lead = format_lead(lead)  # Ensure consistent field access
+                for term in search_terms:
+                    # Phone number exact match
+                    if 'phone' in lead and lead['phone'] and term in (lead['phone'] or '').replace('-', '').replace(' ', ''):
+                        return True
+                    # Other fields
+                    for field in search_fields:
+                        if field == 'phone':
+                            continue
+                        value = str(lead.get(field, '') or '').lower()
+                        if field in ['leadstatus', 'leadsource']:
+                            if term == value:
+                                return True
+                        elif term in value:
+                            return True
+                return False
+            
+            # Apply search filter
+            leads = [lead for lead in leads if matches_search(lead)]
+            total_count = len(leads)  # Update count after search
+            
+            # Re-apply pagination after search
+            if limit > 0:
+                leads = leads[skip:skip + limit]
+        
+        # Calculate pagination values
+        total_pages = (total_count + limit - 1) // limit if limit > 0 else 1
+        current_page = (skip // limit) + 1 if limit > 0 else 1
+        
+        # Log the results
+        logger.info(f"Returning {len(leads)}/{total_count} leads (page: {current_page} of {total_pages})")
+        
+        # Set response headers with pagination info
+        response.headers["X-Total-Count"] = str(total_count)
+        response.headers["X-Page-Size"] = str(limit)
+        response.headers["X-Current-Page"] = str(current_page)
+        response.headers["X-Total-Pages"] = str(total_pages)
+        
+        # Return formatted leads
+        return [format_lead(lead) for lead in leads] if leads else []
         
     except Exception as e:
+        logger.error(f"Error in get_leads: {str(e)}")
         handle_supabase_error(e)
+        return []  # Return empty list on error
+
+@router.patch("/{lead_id}/status", response_model=Dict[str, Any])
+async def update_lead_status(
+    lead_id: int,
+    status_update: LeadStatusUpdate,
+    response: Response = None
+):
+    """
+    Update a lead's status
+    """
+    try:
+        # First check if lead exists
+        existing_lead = db.supabase.table('leads').select('*').eq('id', lead_id).execute()
+        if not existing_lead.data:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+        
+        # Update the lead status
+        updated_lead = db.supabase.table('leads')\
+            .update({
+                'leadstatus': status_update.leadstatus,
+                'updatedat': datetime.now(timezone.utc).isoformat()
+            })\
+            .eq('id', lead_id)\
+            .execute()
+        
+        if not updated_lead.data:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update lead status")
+            
+        return format_lead(updated_lead.data[0])
+        
+    except Exception as e:
+        logger.error(f"Error updating lead status: {str(e)}")
+        handle_supabase_error(e)
+
 
 @router.get("/{lead_id}", response_model=Dict[str, Any])
 async def get_lead(lead_id: int):
@@ -220,17 +320,31 @@ async def create_lead(lead: LeadCreate):
     Create a new lead
     """
     try:
+        # Convert lead to dict and handle datetime serialization
         lead_data = lead.dict(exclude_unset=True)
-        lead_data['createdat'] = datetime.now(timezone.utc)
         
+        # Convert datetime to ISO format string for Supabase
+        current_time = datetime.now(timezone.utc).isoformat()
+        lead_data['createdat'] = current_time
+        
+        # Ensure metadata is properly serialized
+        if 'metadata' in lead_data and lead_data['metadata'] is not None:
+            if isinstance(lead_data['metadata'], dict):
+                lead_data['metadata'] = json.dumps(lead_data['metadata'])
+        
+        logger.info(f"Inserting lead data: {lead_data}")
+        
+        # Insert into Supabase
         result = db.supabase.table('leads').insert(lead_data).execute()
         
         if not result.data:
+            logger.error("No data returned from Supabase insert")
             raise HTTPException(status_code=400, detail="Failed to create lead")
             
         return format_lead(result.data[0])
         
     except Exception as e:
+        logger.error(f"Error creating lead: {str(e)}", exc_info=True)
         handle_supabase_error(e)
 
 @router.put("/{lead_id}", response_model=Dict[str, Any])
@@ -302,12 +416,18 @@ async def update_lead(lead_id: int, lead_update: Union[Dict[str, Any], LeadUpdat
                 except (ValueError, TypeError):
                     pass  # Keep as string if conversion fails
         
-        # Add updated timestamp
+        # Add updated timestamp as ISO format string
         update_data['updatedat'] = datetime.now(timezone.utc).isoformat()
+        
+        # Ensure metadata is properly serialized if it's a dict
+        if 'metadata' in update_data and isinstance(update_data['metadata'], dict):
+            update_data['metadata'] = json.dumps(update_data['metadata'])
         
         # Remove fields that shouldn't be updated
         for field in ['id', 'createdat']:
             update_data.pop(field, None)
+            
+        logger.info(f"Update data after cleanup: {update_data}")
         
         logger.info(f"Final update data after processing: {update_data}")
         
