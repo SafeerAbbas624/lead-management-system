@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { AlertCircle, Check, Send } from "lucide-react"
-import { uploadBatchesApi, clientsApi, distributionApi } from "@/lib/mock-api"
+// import { uploadBatchesApi, clientsApi, distributionApi } from "@/lib/mock-api"
 import { useToast } from "@/hooks/use-toast"
 import { format } from "date-fns"
 
@@ -28,27 +28,23 @@ export default function DistributionPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        setLoading(true)
-        const [batchesData, clientsData, distributionsData] = await Promise.all([
-          uploadBatchesApi.getUploadBatches(),
-          clientsApi.getClients(true), // Active clients only
-          distributionApi.getDistributions(),
-        ])
-
-        // Filter batches to only include completed ones
-        const completedBatches = batchesData.filter((batch) => batch.status === "Completed")
-        setBatches(completedBatches)
-        setClients(clientsData)
-        setDistributions(distributionsData)
+        setLoading(true);
+        const [batchesRes, clientsRes, historyRes] = await Promise.all([
+          fetch('/api/distribution/batches').then(res => res.json()),
+          fetch('/api/distribution/clients').then(res => res.json()),
+          fetch('/api/distribution/history').then(res => res.json()),
+        ]);
+        setBatches(batchesRes || []);
+        setClients(clientsRes || []);
+        setDistributions(historyRes || []);
       } catch (error) {
-        console.error("Error fetching distribution data:", error)
-        setError("Failed to load data. Please try again.")
+        console.error("Error fetching distribution data:", error);
+        setError("Failed to load data. Please try again.");
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
-
-    fetchData()
+    };
+    fetchData();
   }, [])
 
   const handleClientSelection = (clientId: string) => {
@@ -76,23 +72,26 @@ export default function DistributionPage() {
     setDistributing(true)
 
     try {
-      const result = await distributionApi.distributeLeads(
-        Number.parseInt(selectedBatch),
-        selectedClients.map((id) => Number.parseInt(id)),
-      )
-
+      const response = await fetch('/api/distribution/distribute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batchId: Number.parseInt(selectedBatch),
+          clientIds: selectedClients.map((id) => Number.parseInt(id)),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Distribution failed');
       toast({
         title: "Leads distributed successfully",
         description: `Distributed ${result.totalLeads} leads to ${result.distributions.length} clients`,
-      })
-
+      });
       // Refresh distributions
-      const updatedDistributions = await distributionApi.getDistributions()
-      setDistributions(updatedDistributions)
-
+      const updatedDistributions = await fetch('/api/distribution/history').then(res => res.json());
+      setDistributions(updatedDistributions);
       // Reset selection
-      setSelectedBatch("")
-      setSelectedClients([])
+      setSelectedBatch("");
+      setSelectedClients([]);
     } catch (err: any) {
       setError(err.message || "Failed to distribute leads")
     } finally {
