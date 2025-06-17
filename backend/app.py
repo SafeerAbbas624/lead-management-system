@@ -193,14 +193,6 @@ async def auto_mapping_endpoint(
         logger.error(f"Error in /auto-mapping endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/process-leads")
-async def process_leads_endpoint(request: ProcessLeadsRequest):
-    try:
-        return handle_process_leads(request, db, data_processor)
-    except Exception as e:
-        logger.error(f"Error in /process-leads endpoint: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
 # Dashboard Endpoints
 @app.get("/api/dashboard/stats")
 async def get_dashboard_stats(

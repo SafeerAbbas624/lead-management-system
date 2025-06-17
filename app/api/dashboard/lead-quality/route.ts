@@ -6,55 +6,72 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+type Lead = {
+  id: number;
+  leadscore: number | null;
+  createdat: string;
+};
+
 type LeadQualityData = {
   name: string;
   value: number;
   percentage: number;
 };
 
+const QUALITY_RANGES = [
+  { name: 'Poor (0-3)', min: 0, max: 3 },
+  { name: 'Fair (4-6)', min: 4, max: 6 },
+  { name: 'Good (7-8)', min: 7, max: 8 },
+  { name: 'Very Good (9)', min: 9, max: 9 },
+  { name: 'Excellent (10)', min: 10, max: 10 },
+] as const;
+
 export async function GET() {
   try {
-    // Fetch leads with their quality scores (assuming a quality_score column exists)
+    // Fetch leads with their lead scores
     const { data: leads, error: leadsError } = await supabase
       .from('leads')
-      .select('id, quality_score, createdat')
-      .not('quality_score', 'is', null);
+      .select<Lead>('id, leadscore, createdat')
+      .not('leadscore', 'is', null)
+      .order('createdat', { ascending: false });
 
     if (leadsError) throw leadsError;
 
-    // If no quality_score column or data, return sample data
+    // If no leads with scores found, return sample data
     if (!leads || leads.length === 0) {
+      console.warn('No lead score data found. Returning sample data.');
       return NextResponse.json({
         data: generateSampleData(),
-        message: 'No quality score data found. Showing sample data.'
+        message: 'No lead score data found. Showing sample data.'
       });
     }
 
-    // Categorize leads by quality score
-    const qualityRanges = [
-      { name: 'Poor', min: 0, max: 3 },
-      { name: 'Fair', min: 4, max: 6 },
-      { name: 'Good', min: 7, max: 8 },
-      { name: 'Very Good', min: 9, max: 9 },
-      { name: 'Excellent', min: 10, max: 10 },
-    ];
-
     // Count leads in each quality range
-    const qualityCounts = qualityRanges.map(range => {
+    const qualityCounts = QUALITY_RANGES.map(range => {
       const count = leads.filter(lead => {
-        const score = parseFloat(lead.quality_score);
-        return score >= range.min && score <= range.max;
+        if (lead.leadscore === null) return false;
+        const score = parseFloat(lead.leadscore.toString());
+        return !isNaN(score) && score >= range.min && score <= range.max;
       }).length;
       
       return {
         name: range.name,
         value: count,
-        percentage: Math.round((count / leads.length) * 100)
+        percentage: leads.length > 0 ? Math.round((count / leads.length) * 100) : 0
       };
     });
 
     // Filter out empty categories
     const result = qualityCounts.filter(item => item.value > 0);
+
+    // If all categories are empty, return sample data
+    if (result.length === 0) {
+      console.warn('No leads matched the quality ranges. Showing sample data.');
+      return NextResponse.json({
+        data: generateSampleData(),
+        message: 'No leads matched the quality ranges. Showing sample data.'
+      });
+    }
 
     return NextResponse.json({ data: result });
 
@@ -69,13 +86,13 @@ export async function GET() {
   }
 }
 
-// Generate sample data for demonstration
+// Generate sample data for demonstration or fallback
 function generateSampleData(): LeadQualityData[] {
   return [
-    { name: 'Poor', value: 15, percentage: 15 },
-    { name: 'Fair', value: 35, percentage: 35 },
-    { name: 'Good', value: 30, percentage: 30 },
-    { name: 'Very Good', value: 15, percentage: 15 },
-    { name: 'Excellent', value: 5, percentage: 5 },
+    { name: 'Poor (0-3)', value: 15, percentage: 15 },
+    { name: 'Fair (4-6)', value: 35, percentage: 35 },
+    { name: 'Good (7-8)', value: 30, percentage: 30 },
+    { name: 'Very Good (9)', value: 15, percentage: 15 },
+    { name: 'Excellent (10)', value: 5, percentage: 5 },
   ];
 }

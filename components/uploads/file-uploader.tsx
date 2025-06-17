@@ -619,7 +619,7 @@ export function FileUploader() {
       }
 
       // Send the request
-      const response = await fetch(`${BACKEND_URL}/process-leads`, {
+      const response = await fetch(`${BACKEND_URL}/api/process-leads`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

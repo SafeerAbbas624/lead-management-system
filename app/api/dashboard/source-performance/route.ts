@@ -9,19 +9,21 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // Define types for better type safety
 type Lead = {
   id: number;
-  leadSource: string;
-  leadStatus: string;
-  createdAt: string;
+  leadsource: string | null;
+  leadstatus: string | null;
+  createdat: string;
+};
+
+type Supplier = {
+  id: number;
+  name: string;
+  leadCost: number;
 };
 
 type UploadBatch = {
   id: number;
   sourceName: string;
-  supplier: {
-    id: number;
-    name: string;
-    leadCost: number;
-  } | null;
+  supplier: Supplier | Supplier[] | null;
 };
 
 type SourceMetrics = {
@@ -49,13 +51,23 @@ export async function GET() {
     // Get leads by source with their statuses and creation dates
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
+
+    // Get all leads with source information
     const { data: leads, error: leadsError } = await supabase
       .from('leads')
-      .select('id, leadSource, leadStatus, createdAt')
-      .not('leadSource', 'is', null);
+      .select('id, leadsource, leadstatus, createdat')
+      .not('leadsource', 'is', null);
 
     if (leadsError) throw leadsError;
+
+    // Get recent leads for last 30 days
+    const { data: recentLeads, error: recentLeadsError } = await supabase
+      .from('leads')
+      .select('id, leadsource, leadstatus, createdat')
+      .gt('createdat', thirtyDaysAgo.toISOString())
+      .not('leadsource', 'is', null);
+
+    if (recentLeadsError) throw recentLeadsError;
 
     // Get upload batches with supplier info
     const { data: batches, error: batchesError } = await supabase
@@ -68,10 +80,10 @@ export async function GET() {
     // Process the data to calculate metrics by source
     const sourceMetrics: Record<string, SourceMetrics> = {};
 
-    // Initialize source metrics
-    leads.forEach((lead: Lead) => {
-      const source = lead.leadSource;
-      const isRecent = new Date(lead.createdAt) > thirtyDaysAgo;
+    // Initialize metrics for each source from leads
+    leads?.forEach(lead => {
+      const source = lead.leadsource;
+      if (!source) return;
       
       if (!sourceMetrics[source]) {
         sourceMetrics[source] = {
@@ -95,36 +107,27 @@ export async function GET() {
         };
       }
       
-      // Count total leads
+      // Update counts based on lead status
+      const status = (lead.leadstatus || '').toLowerCase();
       sourceMetrics[source].totalLeads++;
+      sourceMetrics[source].statusCounts[status] = (sourceMetrics[source].statusCounts[status] || 0) + 1;
       
-      // Count leads in the last 30 days
-      if (isRecent) {
-        sourceMetrics[source].last30Days.leads++;
-      }
+      // Update status-specific counts
+      if (status.includes('new')) sourceMetrics[source].newLeads++;
+      if (status.includes('contacted')) sourceMetrics[source].contactedLeads++;
+      if (status.includes('qualified')) sourceMetrics[source].qualifiedLeads++;
+      if (status.includes('converted')) sourceMetrics[source].convertedLeads++;
+      if (status.includes('closed') && status.includes('lost')) sourceMetrics[source].closedLostLeads++;
+    });
+    
+    // Process recent leads for 30-day stats
+    recentLeads?.forEach(lead => {
+      const source = lead.leadsource;
+      if (!source || !sourceMetrics[source]) return;
       
-      // Count statuses
-      if (lead.leadStatus) {
-        // Initialize status count if it doesn't exist
-        if (!sourceMetrics[source].statusCounts[lead.leadStatus]) {
-          sourceMetrics[source].statusCounts[lead.leadStatus] = 0;
-        }
-        sourceMetrics[source].statusCounts[lead.leadStatus]++;
-        
-        // Update status-specific counts
-        const status = lead.leadStatus.toLowerCase();
-        if (status.includes('new')) sourceMetrics[source].newLeads++;
-        if (status.includes('contacted')) sourceMetrics[source].contactedLeads++;
-        if (status.includes('qualified')) sourceMetrics[source].qualifiedLeads++;
-        if (status.includes('converted')) {
-          sourceMetrics[source].convertedLeads++;
-          if (isRecent) {
-            sourceMetrics[source].last30Days.converted++;
-          }
-        }
-        if (status.includes('closed') && status.includes('lost')) {
-          sourceMetrics[source].closedLostLeads++;
-        }
+      sourceMetrics[source].last30Days.leads++;
+      if (lead.leadstatus?.toLowerCase().includes('converted')) {
+        sourceMetrics[source].last30Days.converted++;
       }
     });
 

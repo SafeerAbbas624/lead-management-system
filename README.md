@@ -98,6 +98,149 @@ A comprehensive lead management system built with Next.js, FastAPI, and Supabase
 - **User Management**
   - Role-based access control
   - User activity logs
+  - Team collaboration features
+  - Audit trails
+
+- **System Settings**
+  - Email notifications
+  - API key management
+  - Integration settings
+  - System health monitoring
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Node.js 16+ and npm 8+
+- Python 3.8+
+- Supabase account
+- PostgreSQL 13+
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/lead-management-system.git
+   cd lead-management-system
+   ```
+
+2. **Install frontend dependencies**
+   ```bash
+   cd app
+   npm install
+   ```
+
+3. **Install backend dependencies**
+   ```bash
+   cd ../backend
+   pip install -r requirements.txt
+   ```
+
+4. **Environment Setup**
+   - Copy `.env.example` to `.env` in both root and backend directories
+   - Update the variables with your Supabase credentials
+
+5. **Database Setup**
+   - Run database migrations
+   - Seed initial data (if applicable)
+   - Set up necessary indexes
+
+## 🛠 Configuration
+
+### Environment Variables
+
+#### Frontend (`.env`)
+```
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+# Other frontend environment variables
+```
+
+#### Backend (`.env`)
+```
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+DATABASE_URL=your_database_url
+# Other backend environment variables
+```
+
+## 🏃‍♂️ Running the Application
+
+1. **Start the development server**
+   ```bash
+   # From the root directory
+   npm run dev
+   ```
+
+2. **Start the backend server**
+   ```bash
+   # From the backend directory
+   uvicorn app.main:app --reload
+   ```
+
+3. **Access the application**
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:8000
+   - API Documentation: http://localhost:8000/docs
+
+## 🚨 Troubleshooting
+
+### Common Issues
+
+1. **Frontend not connecting to backend**
+   - Ensure both frontend and backend servers are running
+   - Verify CORS settings in the backend
+   - Check network requests in browser's developer tools
+
+2. **Database connection issues**
+   - Verify Supabase credentials in `.env` files
+   - Check if your IP is whitelisted in Supabase
+   - Ensure database migrations have been run
+
+3. **Environment variables not loading**
+   - Make sure `.env` files are in the correct directories
+   - Restart servers after modifying environment variables
+   - Check for typos in variable names
+
+4. **Missing dependencies**
+   ```bash
+   # In frontend directory
+   rm -rf node_modules package-lock.json
+   npm install
+   
+   # In backend directory
+   pip install -r requirements.txt
+   ```
+
+## 📚 API Documentation
+
+For detailed API documentation, visit the Swagger UI at `http://localhost:8000/docs` when the backend server is running.
+
+Key API endpoints include:
+- `POST /api/leads` - Create new leads
+- `GET /api/leads` - List all leads with filters
+- `GET /api/dashboard/stats` - Get dashboard statistics
+- `POST /api/upload` - Upload leads file
+
+## 🤝 Contributing
+
+We welcome contributions! Please follow these steps:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- [Next.js](https://nextjs.org/)
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [Supabase](https://supabase.com/)
+- And all other open source libraries used in this project
   - Permission management
   - Team collaboration tools
 

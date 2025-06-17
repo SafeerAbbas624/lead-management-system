@@ -17,6 +17,9 @@ from database import SupabaseClient
 from field_mapper import FieldMapper
 from duplicate_checker import DuplicateChecker
 from data_processor import DataProcessor
+from fastapi.responses import StreamingResponse, JSONResponse
+import io
+import csv
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +30,77 @@ router = APIRouter()
 
 # Initialize Supabase client
 supabase_client = SupabaseClient()
+
+def batch_to_dict(batch):
+    # Helper to convert batch to dict with camelCase keys for frontend
+    if not batch:
+        return {}
+    return {
+        "id": batch.get("id"),
+        "fileName": batch.get("filename"),
+        "fileType": batch.get("filetype"),
+        "status": batch.get("status"),
+        "totalLeads": batch.get("totalleads"),
+        "cleanedLeads": batch.get("cleanedleads"),
+        "duplicateLeads": batch.get("duplicateleads"),
+        "dncMatches": batch.get("dncmatches"),
+        "sourceName": batch.get("sourcename"),
+        "createdAt": batch.get("createdat"),
+        "completedAt": batch.get("completedat"),
+        "errorMessage": batch.get("errormessage"),
+    }
+
+@router.get("/batch-details/{batch_id}")
+def get_batch_details(batch_id: int):
+    """Get details for a single upload batch."""
+    try:
+        batch = supabase_client.get_upload_batch(batch_id)
+        return {"success": True, "batch": batch_to_dict(batch)}
+    except Exception as e:
+        logger.error(f"Error in /batch-details/{batch_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@router.get("/download-batch/{batch_id}")
+def download_batch(batch_id: int):
+    """Download leads for a batch as CSV."""
+    try:
+        leads = supabase_client.get_leads_by_batch(batch_id)
+        if not leads:
+            return JSONResponse(status_code=404, content={"success": False, "error": "No leads found for this batch."})
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=leads[0].keys())
+        writer.writeheader()
+        writer.writerows(leads)
+        output.seek(0)
+        filename = f"batch_{batch_id}_leads.csv"
+        return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={filename}"})
+    except Exception as e:
+        logger.error(f"Error in /download-batch/{batch_id}: {str(e)}")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+@router.post("/reprocess-batch/{batch_id}")
+def reprocess_batch(batch_id: int):
+    """Trigger reprocessing for an upload batch (mock implementation)."""
+    try:
+        # TODO: Implement real reprocessing logic
+        # For now, just update status to 'processing' and return success
+        supabase_client.update_batch_status(batch_id, "processing")
+        return {"success": True, "message": f"Batch {batch_id} reprocessing started."}
+    except Exception as e:
+        logger.error(f"Error in /reprocess-batch/{batch_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@router.get("/upload-history")
+def get_upload_history(limit: int = 100):
+    """
+    Get upload batch history, most recent first.
+    """
+    try:
+        batches = supabase_client.get_upload_batches(limit=limit)
+        return {"success": True, "batches": batches}
+    except Exception as e:
+        logger.error(f"Error in /upload-history: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 class MappingRule(BaseModel):
     sourceField: str
