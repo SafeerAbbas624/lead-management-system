@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { supabase } from "@/lib/supabase-client"
+import { supabase } from "@/lib/supabase/client"
 import { Users, FileText, AlertTriangle, TrendingUp } from "lucide-react"
 
 interface DashboardStats {

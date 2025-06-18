@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { formatDistanceToNow } from "date-fns"
-import { supabase } from "@/lib/supabase-client"
+import { supabase } from "@/lib/supabase/client"
 
 interface UploadBatch {
   id: number

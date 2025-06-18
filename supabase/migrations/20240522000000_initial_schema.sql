@@ -113,25 +113,26 @@ CREATE TABLE IF NOT EXISTS lead_distributions (
   createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create some initial data
+-- -- Create some initial data
 
--- Insert suppliers
-INSERT INTO suppliers (name, email, contactPerson, apiKey, status, leadCost)
+-- -- Insert suppliers
+INSERT INTO suppliers (name, email, contactPerson, apiKey, status, leadCost, "createdAt", "updatedAt")
 VALUES
-  ('Lead Gen Pro', 'contact@leadgenpro.com', 'Sarah Sales', 'lgp_api_12345', 'Active', 2.50),
-  ('Data Partners Inc', 'info@datapartners.com', 'Mike Marketing', 'dpi_api_67890', 'Active', 3.00),
-  ('LeadSource Direct', 'support@leadsource.com', 'Lisa Leads', 'lsd_api_54321', 'Inactive', 1.75);
+  ('Lead Gen Pro', 'contact@leadgenpro.com', 'Sarah Sales', 'lgp_api_12345', 'Active', 2.50, NOW(), NOW()),
+  ('Data Partners Inc', 'info@datapartners.com', 'Mike Marketing', 'dpi_api_67890', 'Active', 3.00, NOW(), NOW()),
+  ('LeadSource Direct', 'support@leadsource.com', 'Lisa Leads', 'lsd_api_54321', 'Inactive', 1.75, NOW(), NOW());
 
--- Insert DNC lists
-INSERT INTO dnc_lists (name, type, description, isActive)
+-- -- Insert DNC lists
+INSERT INTO dnc_lists (name, type, description, isActive, "createdAt", "lastUpdated")
 VALUES
-  ('Internal DNC', 'internal', 'Company-wide do not contact list', TRUE),
-  ('Federal DNC', 'federal', 'Federal do not call registry', TRUE),
-  ('Client A DNC', 'client', 'Client-specific do not contact list', TRUE);
+  ('Internal DNC', 'internal', 'Company-wide do not contact list', TRUE, NOW(), NOW()),
+  ('Federal DNC', 'federal', 'Federal do not call registry', TRUE, NOW(), NOW()),
+  ('Client A DNC', 'client', 'Client-specific do not contact list', TRUE, NOW(), NOW());
+--   ('Client A DNC', 'client', 'Client-specific do not contact list', TRUE);
 
--- Insert clients
-INSERT INTO clients (name, email, phone, contactPerson, deliveryFormat, deliverySchedule, percentAllocation, fixedAllocation, isActive)
-VALUES
-  ('Acme Corporation', 'leads@acme.com', '(555) 123-4567', 'John Manager', 'CSV', 'Daily', 30, NULL, TRUE),
-  ('XYZ Industries', 'leads@xyz.com', '(555) 987-6543', 'Jane Director', 'JSON', 'Weekly', 50, NULL, TRUE),
-  ('123 Enterprises', 'leads@123ent.com', '(555) 456-7890', 'Bob Executive', 'API', 'Real-time', NULL, 100, FALSE);
+-- -- Insert clients
+-- INSERT INTO clients (name, email, phone, contactPerson, deliveryFormat, deliverySchedule, percentAllocation, fixedAllocation, isActive)
+-- VALUES
+--   ('Acme Corporation', 'leads@acme.com', '(555) 123-4567', 'John Manager', 'CSV', 'Daily', 30, NULL, TRUE),
+--   ('XYZ Industries', 'leads@xyz.com', '(555) 987-6543', 'Jane Director', 'JSON', 'Weekly', 50, NULL, TRUE),
+--   ('123 Enterprises', 'leads@123ent.com', '(555) 456-7890', 'Bob Executive', 'API', 'Real-time', NULL, 100, FALSE);

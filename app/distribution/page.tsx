@@ -16,8 +16,24 @@ import { format } from "date-fns"
 
 export default function DistributionPage() {
   const { toast } = useToast()
-  const [batches, setBatches] = useState<any[]>([])
-  const [clients, setClients] = useState<any[]>([])
+  interface Batch {
+    id: number;
+    filename: string;  // Changed from fileName to match database schema
+    cleanedleads: number;  // Changed from cleanedLeads to match database schema
+    status: string;
+    // Other fields from upload_batches table
+  }
+
+  interface Client {
+    id: string | number;
+    name: string;
+    email: string;
+    percentAllocation?: number;
+    fixedAllocation?: number;
+  }
+
+  const [batches, setBatches] = useState<Batch[]>([])
+  const [clients, setClients] = useState<Client[]>([])
   const [distributions, setDistributions] = useState<any[]>([])
   const [selectedBatch, setSelectedBatch] = useState<string>("")
   const [selectedClients, setSelectedClients] = useState<string[]>([])
@@ -29,17 +45,36 @@ export default function DistributionPage() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [batchesRes, clientsRes, historyRes] = await Promise.all([
-          fetch('/api/distribution/batches').then(res => res.json()),
+        console.log('Fetching data...');
+        const [batchesResponse, clientsResponse, historyResponse] = await Promise.all([
+          fetch('/api/distribution/batches').then(async res => {
+            const data = await res.json();
+            console.log('Batches API response:', data);
+            return data;
+          }),
           fetch('/api/distribution/clients').then(res => res.json()),
           fetch('/api/distribution/history').then(res => res.json()),
         ]);
-        setBatches(batchesRes || []);
-        setClients(clientsRes || []);
-        setDistributions(historyRes || []);
+        
+        console.log('Raw batches response:', batchesResponse);
+        
+        // Ensure we're setting arrays even if the response is malformed
+        const batchesData = Array.isArray(batchesResponse) ? batchesResponse : [];
+        const clientsData = Array.isArray(clientsResponse) ? clientsResponse : [];
+        const distributionsData = Array.isArray(historyResponse) ? historyResponse : [];
+        
+        console.log('Processed batches data:', batchesData);
+        
+        setBatches(batchesData);
+        setClients(clientsData);
+        setDistributions(distributionsData);
       } catch (error) {
         console.error("Error fetching distribution data:", error);
         setError("Failed to load data. Please try again.");
+        // Reset to empty arrays on error
+        setBatches([]);
+        setClients([]);
+        setDistributions([]);
       } finally {
         setLoading(false);
       }
@@ -106,7 +141,7 @@ export default function DistributionPage() {
 
   const getBatchName = (batchId: number) => {
     const batch = batches.find((b) => b.id === batchId)
-    return batch ? batch.fileName : "Unknown Batch"
+    return batch ? batch.filename : "Unknown Batch"
   }
 
   return (
@@ -144,11 +179,17 @@ export default function DistributionPage() {
                       <SelectValue placeholder="Select a batch" />
                     </SelectTrigger>
                     <SelectContent>
-                      {batches.map((batch) => (
-                        <SelectItem key={batch.id} value={batch.id.toString()}>
-                          {batch.fileName} ({batch.cleanedLeads} leads)
-                        </SelectItem>
-                      ))}
+                      {batches.length === 0 ? (
+                        <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                          No completed batches found
+                        </div>
+                      ) : (
+                        batches.map((batch) => (
+                          <SelectItem key={batch.id} value={batch.id.toString()}>
+                            {batch.filename} ({batch.cleanedleads} leads)
+                          </SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -225,19 +266,27 @@ export default function DistributionPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {distributions.map((dist) => (
-                      <TableRow key={dist.id}>
-                        <TableCell>{getBatchName(dist.batchId)}</TableCell>
-                        <TableCell>{getClientName(dist.clientId)}</TableCell>
-                        <TableCell>{dist.leadsAllocated}</TableCell>
-                        <TableCell>
-                          <DeliveryStatusBadge status={dist.deliveryStatus} />
-                        </TableCell>
-                        <TableCell>
-                          {dist.deliveryDate ? format(new Date(dist.deliveryDate), "MMM d, yyyy h:mm a") : "Pending"}
+                    {distributions.length > 0 ? (
+                      distributions.map((dist) => (
+                        <TableRow key={dist.id}>
+                          <TableCell>{getBatchName(dist.batchId)}</TableCell>
+                          <TableCell>{getClientName(dist.clientId)}</TableCell>
+                          <TableCell>{dist.leadsAllocated}</TableCell>
+                          <TableCell>
+                            <DeliveryStatusBadge status={dist.deliveryStatus} />
+                          </TableCell>
+                          <TableCell>
+                            {dist.deliveryDate ? format(new Date(dist.deliveryDate), "MMM d, yyyy h:mm a") : "Pending"}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
+                          No distribution history found
                         </TableCell>
                       </TableRow>
-                    ))}
+                    )}
                   </TableBody>
                 </Table>
               )}

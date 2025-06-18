@@ -12,7 +12,7 @@ import {
   TrendingUp,
   Activity,
 } from "lucide-react"
-import { supabase } from "@/lib/supabase-client"
+import { supabase } from "@/lib/supabase/client"
 
 interface DashboardStats {
   // Overview
