@@ -42,27 +42,55 @@ __pycache__/
 *$py.class
 *.so
 .Python
+
+# Virtual Environment
+venv/
 env/
-build/
-develop-eggs/
+ENV/
+.venv/
+.venv*
+
+# Build and distribution
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
+build/
 *.egg-info/
 .installed.cfg
 *.egg
+.eggs/
 
-# IDE
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IDE and Editor files
 .idea/
 .vscode/
-*.swp
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 *.swo
+*~
+.DS_Store
+Thumbs.db
 
 # Supabase
 .supabase/
