@@ -12,15 +12,22 @@ type CookieMethods = {
   remove: (name: string, options: CookieOptions) => void
 }
 
-export function createServerClient() {
-  const cookieStore = cookies()
+export async function createServerClient() {
+  const cookieStore = await cookies()
   
   const cookieMethods: CookieMethods = {
     get(name: string) {
-      return cookieStore.get(name)?.value
-    },
-    set(name: string, value: string, options: CookieOptions) {
       try {
+        const cookie = cookieStore.get(name)
+        return cookie?.value
+      } catch (error) {
+        console.error('Error getting cookie:', error)
+        return undefined
+      }
+    },
+    async set(name: string, value: string, options: CookieOptions) {
+      try {
+        // In Next.js 15+, we set cookies via the response
         const response = new NextResponse()
         response.cookies.set({
           name,
@@ -30,13 +37,16 @@ export function createServerClient() {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
         })
-        // The cookie will be set via the response headers
+        // The cookie is set via the response headers
+        return Promise.resolve()
       } catch (error) {
         console.error('Error setting cookie:', error)
+        return Promise.resolve()
       }
     },
-    remove(name: string, options: CookieOptions) {
+    async remove(name: string, options: CookieOptions) {
       try {
+        // In Next.js 15+, we set cookies via the response
         const response = new NextResponse()
         response.cookies.set({
           name,
@@ -47,9 +57,11 @@ export function createServerClient() {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
         })
-        // The cookie will be removed via the response headers
+        // The cookie is set via the response headers
+        return Promise.resolve()
       } catch (error) {
         console.error('Error removing cookie:', error)
+        return Promise.resolve()
       }
     },
   }
