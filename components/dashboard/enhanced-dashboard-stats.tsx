@@ -98,8 +98,52 @@ export function EnhancedDashboardStats() {
           throw new Error("Response is not JSON")
         }
 
-        const data = await response.json()
-        setStats(data)
+        const { data } = await response.json()
+        if (data) {
+          // Transform the nested data structure to match the component's expected format
+          setStats({
+            // Overview
+            totalLeads: data.overview?.totalLeads || 0,
+            totalUploads: data.overview?.totalUploads || 0,
+            totalSuppliers: data.overview?.totalSuppliers || 0,
+            activeClients: data.overview?.activeClients || 0,
+            
+            // Lead Status
+            newLeads: data.leads?.new || 0,
+            contactedLeads: data.leads?.contacted || 0,
+            qualifiedLeads: data.leads?.qualified || 0,
+            convertedLeads: data.leads?.converted || 0,
+            closedLostLeads: data.leads?.closedLost || 0,
+            
+            // Quality Metrics
+            dncMatches: data.quality?.dncMatches || 0,
+            duplicateLeads: data.quality?.duplicateLeads || 0,
+            cleanLeads: data.quality?.cleanLeads || 0,
+            qualityScore: data.quality?.qualityScore || 0,
+            
+            // Financials
+            totalRevenue: data.financials?.totalRevenue || 0,
+            totalCost: data.financials?.totalCost || 0,
+            netProfit: data.financials?.netProfit || 0,
+            roi: data.financials?.roi || 0,
+            avgLeadCost: data.financials?.avgLeadCost || 0,
+            avgRevenuePerLead: data.financials?.avgRevenuePerLead || 0,
+            
+            // Performance
+            conversionRate: data.performance?.conversionRate || 0,
+            processingBatches: data.performance?.processingBatches || 0,
+            failedBatches: data.performance?.failedBatches || 0,
+            successRate: data.performance?.successRate || 0,
+            
+            // Trends
+            leadsThisMonth: data.trends?.leadsThisMonth || 0,
+            leadsLastMonth: data.trends?.leadsLastMonth || 0,
+            monthOverMonthGrowth: data.trends?.monthOverMonthGrowth || 0,
+            revenueThisMonth: data.trends?.revenueThisMonth || 0,
+            revenueLastMonth: data.trends?.revenueLastMonth || 0,
+            revenueGrowth: data.trends?.revenueGrowth || 0
+          })
+        }
       } catch (err) {
         console.error("Error fetching dashboard stats:", err)
         setError(err instanceof Error ? err.message : "An error occurred")
