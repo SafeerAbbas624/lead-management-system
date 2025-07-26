@@ -1,0 +1,109 @@
+import { NextResponse } from 'next/server';
+import { createServerClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+
+export async function GET() {
+  try {
+    const cookieStore = cookies();
+    const supabase = createServerClient();
+    
+    const { data: suppliers, error } = await supabase
+      .from('suppliers')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return NextResponse.json(
+        { error: 'Failed to fetch suppliers', details: error.message },
+        { status: 500 }
+      );
+    }
+
+    // Calculate additional metrics for each supplier
+    const suppliersWithMetrics = await Promise.all(
+      (suppliers || []).map(async (supplier) => {
+        // Get total leads for this supplier
+        const { count: totalLeads } = await supabase
+          .from('leads')
+          .select('*', { count: 'exact', head: true })
+          .eq('supplier_id', supplier.id);
+
+        // Get accepted leads count
+        const { count: acceptedLeads } = await supabase
+          .from('leads')
+          .select('*', { count: 'exact', head: true })
+          .eq('supplier_id', supplier.id)
+          .eq('status', 'accepted');
+
+        // Calculate acceptance rate
+        const acceptanceRate = totalLeads > 0 
+          ? Math.round((acceptedLeads / totalLeads) * 100) 
+          : 0;
+
+        return {
+          ...supplier,
+          total_leads: totalLeads || 0,
+          acceptance_rate: acceptanceRate,
+          // Add any other calculated fields here
+        };
+      })
+    );
+
+    return NextResponse.json(suppliersWithMetrics);
+  } catch (error) {
+    console.error('Error in suppliers API route:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const cookieStore = cookies();
+    const supabase = createServerClient();
+    const body = await request.json();
+    
+    // Validate request body
+    if (!body.name || !body.email) {
+      return NextResponse.json(
+        { error: 'Name and email are required' },
+        { status: 400 }
+      );
+    }
+    
+    // Generate API key
+    const apiKey = `sup_${crypto.randomUUID().replace(/-/g, '')}`;
+    
+    const { data, error } = await supabase
+      .from('suppliers')
+      .insert([
+        { 
+          ...body,
+          api_key: apiKey,
+          status: body.status || 'Active',
+          created_at: new Date().toISOString()
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating supplier:', error);
+      return NextResponse.json(
+        { error: 'Failed to create supplier', details: error.message },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(data, { status: 201 });
+  } catch (error) {
+    console.error('Error in supplier creation:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
