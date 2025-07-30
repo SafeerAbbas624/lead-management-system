@@ -28,6 +28,7 @@ interface Lead {
   phone: string;
   companyname: string;
   leadstatus: string;
+  leadsource?: string;
   [key: string]: any;
 }
 
@@ -160,6 +161,7 @@ export default function LeadsTable({ leads, onView, onEdit, onChangeStatus, onDe
               <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Company</TableHead>
+              <TableHead>Source</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -167,7 +169,7 @@ export default function LeadsTable({ leads, onView, onEdit, onChangeStatus, onDe
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
+                <TableCell colSpan={7} className="text-center py-8">
                   <div className="flex justify-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
                   </div>
@@ -176,7 +178,7 @@ export default function LeadsTable({ leads, onView, onEdit, onChangeStatus, onDe
               </TableRow>
             ) : leads.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
+                <TableCell colSpan={7} className="text-center py-8">
                   <p className="text-muted-foreground">No leads found</p>
                 </TableCell>
               </TableRow>
@@ -187,6 +189,11 @@ export default function LeadsTable({ leads, onView, onEdit, onChangeStatus, onDe
                 <TableCell>{lead.email}</TableCell>
                 <TableCell>{lead.phone}</TableCell>
                 <TableCell>{lead.companyname}</TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="text-xs">
+                    {lead.leadsource || 'Unknown'}
+                  </Badge>
+                </TableCell>
                 <TableCell>
                   <Badge className={getStatusColor(lead.leadstatus)}>
                     {lead.leadstatus}

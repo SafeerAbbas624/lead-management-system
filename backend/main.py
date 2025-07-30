@@ -9,6 +9,10 @@ from supabase import create_client, Client as SupabaseClient
 from dotenv import load_dotenv
 import logging
 
+# Import routers
+from hybrid_api import router as hybrid_router
+from upload_file import router as upload_router
+
 # Load environment variables
 load_dotenv()
 
@@ -18,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI
 app = FastAPI(
-    title="Supplier Management API",
-    description="API for managing suppliers and lead processing",
-    version="1.0.0"
+    title="Lead Management System API",
+    description="Hybrid API for lead processing with Python backend and Next.js frontend",
+    version="2.0.0"
 )
 
 # CORS middleware
@@ -41,17 +45,17 @@ supabase: SupabaseClient = create_client(supabase_url, supabase_key)
 class SupplierBase(BaseModel):
     name: str
     email: EmailStr
-    contact_person: Optional[str] = None
+    contactperson: Optional[str] = None
     status: str = "Active"
-    lead_cost: Optional[float] = None
+    leadcost: Optional[float] = None
 
 class SupplierCreate(SupplierBase):
     pass
 
 class Supplier(SupplierBase):
     id: int
-    api_key: str
-    created_at: datetime
+    apikey: str
+    createdat: datetime
 
     class Config:
         from_attributes = True
@@ -109,8 +113,8 @@ async def create_supplier(supplier: SupplierCreate):
         
         # Create supplier in database
         supplier_data = supplier.dict()
-        supplier_data['api_key'] = api_key
-        supplier_data['created_at'] = datetime.utcnow().isoformat()
+        supplier_data['apikey'] = api_key
+        supplier_data['createdat'] = datetime.utcnow().isoformat()
         
         result = supabase.table('suppliers').insert(supplier_data).execute()
         
@@ -154,7 +158,7 @@ async def submit_lead(
         supplier = supabase.table('suppliers') \
             .select('*') \
             .eq('id', supplier_id) \
-            .eq('api_key', x_api_key) \
+            .eq('apikey', x_api_key) \
             .execute()
         
         if not supplier.data:
@@ -181,9 +185,9 @@ async def submit_lead(
         
         # Save lead to database
         lead_data = lead.dict()
-        lead_data['supplier_id'] = supplier_id
-        lead_data['status'] = 'new'
-        lead_data['created_at'] = datetime.utcnow().isoformat()
+        lead_data['supplierid'] = supplier_id
+        lead_data['leadstatus'] = 'New'
+        lead_data['createdat'] = datetime.utcnow().isoformat()
         
         result = supabase.table('leads').insert(lead_data).execute()
         
@@ -207,6 +211,34 @@ async def submit_lead(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process lead"
         )
+
+# Include routers
+app.include_router(hybrid_router, prefix="/api/hybrid", tags=["hybrid-upload"])
+app.include_router(upload_router, prefix="/api", tags=["upload"])
+
+# Root endpoint
+@app.get("/")
+async def root():
+    return {
+        "message": "Lead Management System API",
+        "version": "2.0.0",
+        "status": "running",
+        "endpoints": {
+            "hybrid_upload": "/api/hybrid",
+            "legacy_upload": "/api",
+            "docs": "/docs",
+            "health": "/api/hybrid/health"
+        }
+    }
+
+# Health check
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "service": "lead-management-api",
+        "version": "2.0.0"
+    }
 
 if __name__ == "__main__":
     import uvicorn

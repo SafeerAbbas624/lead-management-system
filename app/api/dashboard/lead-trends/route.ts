@@ -23,9 +23,12 @@ interface LeadTrendData {
 }
 
 interface Lead {
+  id: number;
   createdat: string;
   leadstatus: string;
   leadsource?: string;
+  leadcost?: number;
+  uploadbatchid?: number;
 }
 
 interface DncBatch {
@@ -74,7 +77,8 @@ const formatDate = (date: Date, period: string): string => {
     case 'weekly': {
       const day = d.getUTCDay();
       const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
-      const monday = new Date(d.setUTCDate(diff));
+      const monday = new Date(d);
+      monday.setUTCDate(diff);
       return monday.toISOString().split('T')[0];
     }
     case 'monthly':
@@ -94,26 +98,56 @@ export async function GET(request: NextRequest) {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
+
+
     // Validate period parameter
     if (!['hourly', 'daily', 'weekly', 'monthly'].includes(period)) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Invalid period parameter. Must be one of: hourly, daily, weekly, monthly' 
+        {
+          success: false,
+          error: 'Invalid period parameter. Must be one of: hourly, daily, weekly, monthly'
         },
         { status: 400 }
       );
     }
 
+    // First, let's check if we have any leads at all
+    const { data: allLeads, error: allLeadsError } = await supabase
+      .from('leads')
+      .select('createdat, leadstatus, leadsource')
+      .limit(5);
+
+
+
     // Fetch leads data with their upload dates and status
     const { data: leadsData, error: leadsError } = await supabase
       .from('leads')
-      .select('createdat, leadstatus, leadsource')
+      .select('id, createdat, leadstatus, leadsource, leadcost, uploadbatchid')
       .gte('createdat', startDate.toISOString())
       .lte('createdat', endDate.toISOString())
       .order('createdat', { ascending: true });
 
     if (leadsError) throw leadsError;
+
+    // Fetch actual sales data from clients_history
+    const { data: salesData, error: salesError } = await supabase
+      .from('clients_history')
+      .select('lead_id, selling_cost, distributed_at')
+      .gte('distributed_at', startDate.toISOString())
+      .lte('distributed_at', endDate.toISOString())
+      .order('distributed_at', { ascending: true });
+
+    if (salesError) throw salesError;
+
+    // Fetch cost data from upload_batches
+    const { data: costData, error: costError } = await supabase
+      .from('upload_batches')
+      .select('id, createdat, total_buying_price, totalleads, buying_price_per_lead')
+      .gte('createdat', startDate.toISOString())
+      .lte('createdat', endDate.toISOString())
+      .order('createdat', { ascending: true });
+
+    if (costError) throw costError;
 
     // Fetch DNC matches
     const { data: dncData, error: dncError } = await supabase
@@ -163,51 +197,115 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Process leads data
-    (leadsData || []).forEach((lead: Lead) => {
+    // Create maps for quick lookup
+    const salesMap = new Map<number, { selling_cost: number; distributed_at: string }>();
+    (salesData || []).forEach(sale => {
+      if (sale.lead_id) {
+        salesMap.set(sale.lead_id, {
+          selling_cost: parseFloat(sale.selling_cost) || 0,
+          distributed_at: sale.distributed_at
+        });
+      }
+    });
+
+    const batchCostMap = new Map<number, { buying_price_per_lead: number; total_buying_price: number }>();
+    (costData || []).forEach(batch => {
+      if (batch.id) {
+        batchCostMap.set(batch.id, {
+          buying_price_per_lead: parseFloat(batch.buying_price_per_lead) || 0,
+          total_buying_price: parseFloat(batch.total_buying_price) || 0
+        });
+      }
+    });
+
+    // Process leads data with real costs and revenue
+    (leadsData || []).forEach((lead: any) => {
       if (!lead.createdat) return;
-      
+
       const periodKey = formatDate(new Date(lead.createdat), period);
-      const periodData = periodMap.get(periodKey) || {
-        date: periodKey,
-        totalLeads: 0,
-        newLeads: 0,
-        contactedLeads: 0,
-        qualifiedLeads: 0,
-        convertedLeads: 0,
-        closedLostLeads: 0,
-        dncLeads: 0,
-        totalCost: 0,
-        totalRevenue: 0,
-        profit: 0,
-        roi: 0
-      };
-      
+
+      let periodData = periodMap.get(periodKey);
+      if (!periodData) {
+        periodData = {
+          date: periodKey,
+          totalLeads: 0,
+          newLeads: 0,
+          contactedLeads: 0,
+          qualifiedLeads: 0,
+          convertedLeads: 0,
+          closedLostLeads: 0,
+          dncLeads: 0,
+          totalCost: 0,
+          totalRevenue: 0,
+          profit: 0,
+          roi: 0
+        };
+        periodMap.set(periodKey, periodData);
+      }
+
       // Update lead counts by status
       periodData.totalLeads++;
       const status = lead.leadstatus?.toLowerCase() || '';
-      
+
       if (status.includes('new')) periodData.newLeads++;
       if (status.includes('contacted')) periodData.contactedLeads++;
       if (status.includes('qualified')) periodData.qualifiedLeads++;
       if (status.includes('converted')) periodData.convertedLeads++;
       if (status.includes('closed') && status.includes('lost')) periodData.closedLostLeads++;
-      
-      // Calculate costs and revenue (adjust these calculations based on your business logic)
-      const leadCost = 5; // Example: $5 per lead
-      const conversionRevenue = 50; // Example: $50 per converted lead
-      
-      periodData.totalCost += leadCost;
-      if (status.includes('converted')) {
-        periodData.totalRevenue += conversionRevenue;
+
+      // Calculate real costs from upload_batches
+      let leadCost = 0;
+      if (lead.uploadbatchid && batchCostMap.has(lead.uploadbatchid)) {
+        leadCost = batchCostMap.get(lead.uploadbatchid)!.buying_price_per_lead;
+      } else if (lead.leadcost) {
+        leadCost = parseFloat(lead.leadcost) || 0;
       }
-      
-      periodData.profit = periodData.totalRevenue - periodData.totalCost;
-      periodData.roi = periodData.totalCost > 0 
-        ? (periodData.profit / periodData.totalCost) * 100 
-        : 0;
-      
+
+      periodData.totalCost += leadCost;
+
       periodMap.set(periodKey, periodData);
+    });
+
+    // Process actual sales data for revenue
+    (salesData || []).forEach((sale: any) => {
+      if (!sale.distributed_at) return;
+
+      const periodKey = formatDate(new Date(sale.distributed_at), period);
+
+      let periodData = periodMap.get(periodKey);
+      if (!periodData) {
+        periodData = {
+          date: periodKey,
+          totalLeads: 0,
+          newLeads: 0,
+          contactedLeads: 0,
+          qualifiedLeads: 0,
+          convertedLeads: 0,
+          closedLostLeads: 0,
+          dncLeads: 0,
+          totalCost: 0,
+          totalRevenue: 0,
+          profit: 0,
+          roi: 0
+        };
+        periodMap.set(periodKey, periodData);
+      }
+
+      // Add actual revenue from sales
+      const revenue = parseFloat(sale.selling_cost) || 0;
+      periodData.totalRevenue += revenue;
+      periodData.convertedLeads++; // Count actual conversions from sales
+
+      periodMap.set(periodKey, periodData);
+    });
+
+    // Calculate profit and ROI for each period
+    periodMap.forEach((periodData, key) => {
+      periodData.profit = periodData.totalRevenue - periodData.totalCost;
+      periodData.roi = periodData.totalCost > 0
+        ? (periodData.profit / periodData.totalCost) * 100
+        : 0;
+      periodMap.set(key, periodData);
     });
 
     // Process DNC data
@@ -215,28 +313,46 @@ export async function GET(request: NextRequest) {
       if (!batch.createdat) return;
       
       const periodKey = formatDate(new Date(batch.createdat), period);
-      const periodData = periodMap.get(periodKey) || {
-        date: periodKey,
-        totalLeads: 0,
-        newLeads: 0,
-        contactedLeads: 0,
-        qualifiedLeads: 0,
-        convertedLeads: 0,
-        closedLostLeads: 0,
-        dncLeads: 0,
-        totalCost: 0,
-        totalRevenue: 0,
-        profit: 0,
-        roi: 0
-      };
-      
+      let periodData = periodMap.get(periodKey);
+      if (!periodData) {
+        periodData = {
+          date: periodKey,
+          totalLeads: 0,
+          newLeads: 0,
+          contactedLeads: 0,
+          qualifiedLeads: 0,
+          convertedLeads: 0,
+          closedLostLeads: 0,
+          dncLeads: 0,
+          totalCost: 0,
+          totalRevenue: 0,
+          profit: 0,
+          roi: 0
+        };
+        periodMap.set(periodKey, periodData);
+      }
+
       periodData.dncLeads += batch.dncmatches || 0;
-      periodMap.set(periodKey, periodData);
     });
 
+
+
     // Convert map to array and sort by date
-    const trends = Array.from(periodMap.values())
+    let trends = Array.from(periodMap.values())
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // Simplify: just show periods with data, or if no data, show recent periods
+    const periodsWithData = trends.filter(t => t.totalLeads > 0);
+
+    if (periodsWithData.length > 0) {
+      // Show only periods with data
+      trends = periodsWithData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    } else {
+      // If no data, show recent periods
+      trends = trends.slice(-7).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }
+
+
 
     // Calculate summary statistics
     const summary = {

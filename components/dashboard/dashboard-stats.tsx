@@ -66,13 +66,8 @@ export function DashboardStats() {
       } catch (error) {
         console.error("Error fetching dashboard stats:", error)
 
-        // Fallback to demo data
-        setStats({
-          totalLeads: 1234,
-          totalUploads: 45,
-          dncMatches: 67,
-          conversionRate: 12.5,
-        })
+        // Don't set fallback data - let the error state show
+        setStats(null)
       } finally {
         setLoading(false)
       }

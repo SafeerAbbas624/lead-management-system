@@ -7,17 +7,18 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Plus, Search, TrendingUp, Loader2 } from "lucide-react"
 import { SupplierDialog } from "@/components/supplier/supplier-dialog"
-import { toast } from "@/components/ui/use-toast"
+import { useToast } from "@/hooks/use-toast"
+import { RoleGuard } from "@/components/auth/role-guard"
 
 interface Supplier {
   id: number
   name: string
   email: string
-  contact_person: string | null
+  contactperson: string | null
   status: "Active" | "Inactive"
-  lead_cost: number | null
-  api_key: string
-  created_at: string
+  leadcost: number | null
+  apikey: string
+  createdat: string
   total_leads?: number
   acceptance_rate?: number
   revenue?: number
@@ -28,6 +29,7 @@ export default function SuppliersPage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const { toast } = useToast()
 
   useEffect(() => {
     fetchSuppliers()
@@ -74,10 +76,10 @@ export default function SuppliersPage() {
     )
   }
 
-  const filteredSuppliers = suppliers.filter((supplier) => 
+  const filteredSuppliers = suppliers.filter((supplier) =>
     supplier.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     supplier.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (supplier.contact_person?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false)
+    (supplier.contactperson?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false)
   )
 
   const activeSuppliers = filteredSuppliers.filter(s => s.status === 'Active')
@@ -100,9 +102,9 @@ export default function SuppliersPage() {
         <p className="text-xs text-muted-foreground mt-1">
           {supplier.email}
         </p>
-        {supplier.contact_person && (
+        {supplier.contactperson && (
           <p className="text-xs text-muted-foreground mt-1">
-            Contact: {supplier.contact_person}
+            Contact: {supplier.contactperson}
           </p>
         )}
         {supplier.lead_cost !== null && (
@@ -156,7 +158,8 @@ export default function SuppliersPage() {
   )
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <RoleGuard requiredPermission="canManageSuppliers">
+      <div className="flex flex-col gap-6 p-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Suppliers</h1>
@@ -241,6 +244,7 @@ export default function SuppliersPage() {
           )}
         </TabsContent>
       </Tabs>
-    </div>
+      </div>
+    </RoleGuard>
   )
 }

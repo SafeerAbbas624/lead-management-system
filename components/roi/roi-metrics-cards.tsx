@@ -8,7 +8,25 @@ interface RoiMetricsCardsProps {
 }
 
 export function RoiMetricsCards({ metrics }: RoiMetricsCardsProps) {
-  if (!metrics) return null
+  // Check if metrics and overview data exist
+  if (!metrics || !metrics.overview) {
+    return (
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <Card key={i}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Loading...</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">--</div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    )
+  }
+
+  const overview = metrics.overview
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -18,7 +36,9 @@ export function RoiMetricsCards({ metrics }: RoiMetricsCardsProps) {
           <DollarSign className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold">${metrics.totalRevenue.toLocaleString()}</div>
+          <div className="text-2xl font-bold">
+            ${(overview.totalRevenue || 0).toLocaleString()}
+          </div>
           <p className="text-xs text-muted-foreground">
             <span className="text-green-500 flex items-center">
               <ArrowUp className="mr-1 h-4 w-4" />
@@ -34,7 +54,9 @@ export function RoiMetricsCards({ metrics }: RoiMetricsCardsProps) {
           <DollarSign className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold">${metrics.netProfit.toLocaleString()}</div>
+          <div className="text-2xl font-bold">
+            ${(overview.totalProfit || 0).toLocaleString()}
+          </div>
           <p className="text-xs text-muted-foreground">
             <span className="text-green-500 flex items-center">
               <ArrowUp className="mr-1 h-4 w-4" />
@@ -50,7 +72,7 @@ export function RoiMetricsCards({ metrics }: RoiMetricsCardsProps) {
           <Percent className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold">{metrics.roi}%</div>
+          <div className="text-2xl font-bold">{(overview.roi || 0).toFixed(1)}%</div>
           <p className="text-xs text-muted-foreground">
             <span className="text-green-500 flex items-center">
               <ArrowUp className="mr-1 h-4 w-4" />
@@ -66,7 +88,9 @@ export function RoiMetricsCards({ metrics }: RoiMetricsCardsProps) {
           <Users className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold">{metrics.totalLeads.toLocaleString()}</div>
+          <div className="text-2xl font-bold">
+            {(overview.totalLeads || 0).toLocaleString()}
+          </div>
           <p className="text-xs text-muted-foreground">
             <span className="text-red-500 flex items-center">
               <ArrowDown className="mr-1 h-4 w-4" />

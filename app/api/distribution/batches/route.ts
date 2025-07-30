@@ -1,39 +1,36 @@
-import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server'
 
-export async function GET() {
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000'
+
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createServerClient();
-    
-    // Get completed batches (case-insensitive match)
-    const { data, error } = await supabase
-      .from('upload_batches')
-      .select('*')
-      .ilike('status', 'completed')
-      .order('createdat', { ascending: false });
-      
-    if (error) {
-      console.error('Supabase error:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch batches' },
-        { status: 500 }
-      );
-    }
-    
-    // Return empty array if no completed batches found
-    if (!data || data.length === 0) {
-      return NextResponse.json([], { status: 200 });
-    }
-    
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('Unexpected error:', error);
-    return NextResponse.json(
-      { 
-        error: 'An unexpected error occurred',
-        details: error instanceof Error ? error.message : 'Unknown error'
+    console.log('Frontend API: Fetching available batches for distribution')
+
+    const response = await fetch(`${BACKEND_URL}/api/distribution/batches`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
       },
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Backend error:', response.status, errorText)
+      return NextResponse.json(
+        { error: `Backend error: ${response.status} ${errorText}` },
+        { status: response.status }
+      )
+    }
+
+    const result = await response.json()
+    console.log('Backend response:', result)
+
+    return NextResponse.json(result)
+  } catch (error) {
+    console.error('Error fetching batches:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch batches' },
       { status: 500 }
-    );
+    )
   }
 }

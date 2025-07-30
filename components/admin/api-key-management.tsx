@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog"
 import { Plus, Copy, Key, RefreshCw, Trash2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { RoleGuard } from "@/components/auth/role-guard"
 
 interface ApiKey {
   id: string
@@ -223,7 +224,8 @@ export function ApiKeyManagement() {
   }
 
   return (
-    <div className="space-y-6">
+    <RoleGuard requiredPermission="canManageApiKeys">
+      <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">API Key Management</h2>
@@ -408,6 +410,7 @@ export function ApiKeyManagement() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </RoleGuard>
   )
 }

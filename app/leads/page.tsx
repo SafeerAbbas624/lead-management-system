@@ -2,6 +2,8 @@
 
 import React from 'react';
 import LeadsTable from '@/components/leads/LeadsTable';
+import LeadsStatsCards from '@/components/leads/LeadsStatsCards';
+import AdvancedFilters from '@/components/leads/AdvancedFilters';
 import {
   Dialog,
   DialogContent,
@@ -13,11 +15,23 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useToast } from "@/components/ui/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
 import { Download, Plus, Search, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { fetchLeads, addLead, editLead, changeLeadStatus, deleteLead, fetchLeadsWithSearch, Lead, PaginatedResponse } from '@/services/leadService';
+import {
+  fetchLeads,
+  addLead,
+  editLead,
+  changeLeadStatus,
+  deleteLead,
+  fetchLeadsWithSearch,
+  fetchLeadsWithFilters,
+  Lead,
+  PaginatedResponse,
+  LeadFilters
+} from '@/services/leadService';
 
 export default function LeadsPage() {
   const [leadsData, setLeadsData] = React.useState<PaginatedResponse<Lead>>({
@@ -27,6 +41,7 @@ export default function LeadsPage() {
     pageSize: 10,
     totalPages: 1
   });
+  const [pageSize, setPageSize] = React.useState(10);
   const [isLoading, setIsLoading] = React.useState(false);
   const [addDialogOpen, setAddDialogOpen] = React.useState(false);
   const [viewDialogOpen, setViewDialogOpen] = React.useState(false);
@@ -34,6 +49,8 @@ export default function LeadsPage() {
   const [editDialogOpen, setEditDialogOpen] = React.useState(false);
   const [editingLead, setEditingLead] = React.useState<Lead | null>(null);
   const [searchTerm, setSearchTerm] = React.useState("");
+  const [filters, setFilters] = React.useState<LeadFilters>({});
+  const [statsKey, setStatsKey] = React.useState(0); // For refreshing stats
   const [newLead, setNewLead] = React.useState({
     email: "",
     firstname: "",
@@ -58,17 +75,27 @@ export default function LeadsPage() {
 
   React.useEffect(() => {
     loadLeads();
-  }, [searchTerm]);
+  }, [pageSize]);
 
-  const loadLeads = async (page: number = 1, search: string = searchTerm) => {
+  const loadLeads = async (page: number = 1, customFilters?: LeadFilters) => {
     setIsLoading(true);
     try {
+      const currentFilters = customFilters || filters;
       let response;
-      if (search && search.trim()) {
-        response = await fetchLeadsWithSearch(search.trim(), page, leadsData.pageSize);
+
+      // Check if we have any filters applied
+      const hasFilters = Object.keys(currentFilters).some(key => {
+        const value = currentFilters[key as keyof LeadFilters];
+        return value !== undefined && value !== '' &&
+               (Array.isArray(value) ? value.length > 0 : true);
+      });
+
+      if (hasFilters) {
+        response = await fetchLeadsWithFilters(currentFilters, page, pageSize);
       } else {
-        response = await fetchLeads(page, leadsData.pageSize);
+        response = await fetchLeads(page, pageSize);
       }
+
       setLeadsData(response);
     } catch (error) {
       console.error("Error loading leads:", error);
@@ -86,9 +113,34 @@ export default function LeadsPage() {
     loadLeads(page);
   };
 
+  const handlePageSizeChange = (newPageSize: number) => {
+    setPageSize(newPageSize);
+    // Reset to page 1 when changing page size
+    loadLeads(1);
+  };
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    loadLeads(1, searchTerm);
+    const newFilters = { ...filters, search: searchTerm };
+    setFilters(newFilters);
+    loadLeads(1, newFilters);
+  };
+
+  const handleFiltersChange = (newFilters: LeadFilters) => {
+    setFilters(newFilters);
+  };
+
+  const handleApplyFilters = () => {
+    loadLeads(1, filters);
+    setStatsKey(prev => prev + 1); // Refresh stats
+  };
+
+  const handleClearFilters = () => {
+    const clearedFilters: LeadFilters = {};
+    setFilters(clearedFilters);
+    setSearchTerm("");
+    loadLeads(1, clearedFilters);
+    setStatsKey(prev => prev + 1); // Refresh stats
   };
 
   const getStatusColor = (status: string) => {
@@ -261,9 +313,9 @@ export default function LeadsPage() {
   };
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-6 p-4">
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Leads</h1>
+        <h1 className="text-2xl font-bold">Leads Management</h1>
         <div className="flex gap-2">
           <Button onClick={handleAddLeadOpen}>
             <Plus className="mr-2 h-4 w-4" /> Add Lead
@@ -274,12 +326,30 @@ export default function LeadsPage() {
         </div>
       </div>
 
-      <form onSubmit={handleSearch} className="flex gap-2 mb-4">
+      {/* Stats Cards */}
+      <LeadsStatsCards
+        key={statsKey}
+        filters={filters}
+        onStatsLoad={(stats) => {
+          console.log('Stats loaded:', stats);
+        }}
+      />
+
+      {/* Advanced Filters */}
+      <AdvancedFilters
+        filters={filters}
+        onFiltersChange={handleFiltersChange}
+        onApplyFilters={handleApplyFilters}
+        onClearFilters={handleClearFilters}
+      />
+
+      {/* Quick Search */}
+      <form onSubmit={handleSearch} className="flex gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search leads..."
+            placeholder="Quick search leads..."
             className="w-full pl-8"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -304,12 +374,36 @@ export default function LeadsPage() {
         
         {leadsData.total > 0 && (
           <div className="flex items-center justify-between px-2">
-            <div className="text-sm text-muted-foreground">
-              Showing <span className="font-medium">{(leadsData.page - 1) * leadsData.pageSize + 1}</span> to{' '}
-              <span className="font-medium">
-                {Math.min(leadsData.page * leadsData.pageSize, leadsData.total)}
-              </span>{' '}
-              of <span className="font-medium">{leadsData.total}</span> leads
+            <div className="flex items-center space-x-4">
+              <div className="text-sm text-muted-foreground">
+                Showing <span className="font-medium">{(leadsData.page - 1) * pageSize + 1}</span> to{' '}
+                <span className="font-medium">
+                  {Math.min(leadsData.page * pageSize, leadsData.total)}
+                </span>{' '}
+                of <span className="font-medium">{leadsData.total}</span> leads
+              </div>
+              <div className="flex items-center space-x-2">
+                <Label htmlFor="pageSize" className="text-sm text-muted-foreground">
+                  Show:
+                </Label>
+                <Select
+                  value={pageSize.toString()}
+                  onValueChange={(value) => handlePageSizeChange(parseInt(value))}
+                >
+                  <SelectTrigger className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                    <SelectItem value="500">500</SelectItem>
+                    <SelectItem value="1000">1000</SelectItem>
+                    <SelectItem value="5000">5000</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="flex items-center space-x-2">
               <Button

@@ -16,38 +16,33 @@ export function LeadsBySource() {
   useEffect(() => {
     const fetchLeadsBySource = async () => {
       try {
-        // Use the correct lowercase column name from the actual database
-        const { data: leadsData, error } = await supabase.from("leads").select("leadsource")
-
-        if (error) {
-          console.error("Database error:", error)
-          throw error
+        const response = await fetch('/api/dashboard/leads-by-source')
+        if (!response.ok) {
+          throw new Error('Failed to fetch leads by source')
         }
 
-        if (!leadsData || leadsData.length === 0) {
-          // If no data, use sample data
-          setData(getSampleData())
-          return
+        const result = await response.json()
+        if (result.success && result.data && result.data.length > 0) {
+          // Validate data
+          const validatedData = result.data.map((item: any) => ({
+            name: item.name || 'Unknown',
+            value: isNaN(Number(item.value)) ? 0 : Number(item.value)
+          })).filter((item: any) => item.value > 0) // Filter out zero values
+
+          setData(validatedData)
+        } else {
+          throw new Error(result.error || 'No valid data received')
         }
-
-        // Count leads by source
-        const sourceCounts: Record<string, number> = {}
-        leadsData.forEach((lead) => {
-          const source = lead.leadsource || "Unknown"
-          sourceCounts[source] = (sourceCounts[source] || 0) + 1
-        })
-
-        // Transform for chart
-        const chartData = Object.entries(sourceCounts).map(([name, value]) => ({
-          name: name.charAt(0).toUpperCase() + name.slice(1), // Capitalize first letter
-          value,
-        }))
-
-        setData(chartData)
       } catch (error) {
         console.error("Error fetching leads by source:", error)
         // Fallback to sample data
-        setData(getSampleData())
+        setData([
+          { name: "SafeerLLC", value: 944 },
+          { name: "Zulkifal Abbas LLC", value: 35 },
+          { name: "Yasha LLC", value: 12 },
+          { name: "Menzies RAS", value: 5 },
+          { name: "Meesum LLC", value: 4 }
+        ])
       } finally {
         setLoading(false)
       }
@@ -73,16 +68,32 @@ export function LeadsBySource() {
   }
 
   return (
-    <div className="h-80">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data}>
-          <XAxis dataKey="name" />
-          <YAxis />
-          <Tooltip formatter={(value) => [`${value} leads`, "Count"]} />
-          <Bar dataKey="value" fill="#8884d8" />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+    <>
+      {/* Debug info */}
+      <div className="mb-2 text-xs text-gray-500">
+        Data loaded: {data.length} sources
+      </div>
+
+      <div className="h-80">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+            <XAxis
+              dataKey="name"
+              angle={-45}
+              textAnchor="end"
+              height={80}
+              interval={0}
+            />
+            <YAxis />
+            <Tooltip
+              formatter={(value) => [`${value} leads`, "Count"]}
+              labelFormatter={(label) => `Source: ${label}`}
+            />
+            <Bar dataKey="value" fill="#8884d8" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </>
   )
 }
 

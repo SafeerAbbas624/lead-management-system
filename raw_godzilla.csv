@@ -1,0 +1,5 @@
+given_name,surname,email_address,mobile,address,loan_amount,sales,tax_id,extra
+pat@kelly.com,+1 (123) 456-7890 ext 123,123 Weird St,$5,000.99,$100,000,12-3456789,exclusivity-Pat
+CHRIS@TAYLOR.COM,(999)555-1234 ,456 Odd Lane,10000 USD,50K,99-8877665,,,
+alex@nope.com,123.456.7890,"789 Crazy Rd, Apt 5",£7500,75000,11-2233445,exclu Alex,,
+zoe@dean.com,1-800-555-5555,999 Edge Case Dr,25000,200000,88-7766554,normal,,

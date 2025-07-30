@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts"
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts"
 import { supabase } from "@/lib/supabase/client"
 
 interface TrendData {
@@ -55,25 +55,10 @@ export function LeadTrendsChart() {
         }
 
         const result = await response.json()
-        setData(result.trends || [])
+        setData(result.data?.trends || [])
       } catch (error) {
         console.error("Error fetching lead trends:", error)
-
-        // Generate demo data
-        const demoData = []
-        for (let i = 29; i >= 0; i--) {
-          const date = new Date()
-          date.setDate(date.getDate() - i)
-          demoData.push({
-            date: date.toISOString().split("T")[0],
-            totalLeads: Math.floor(Math.random() * 50) + 30,
-            convertedLeads: Math.floor(Math.random() * 15) + 5,
-            dncLeads: Math.floor(Math.random() * 5) + 1,
-            totalCost: Math.floor(Math.random() * 200) + 100,
-            totalRevenue: Math.floor(Math.random() * 500) + 300,
-          })
-        }
-        setData(demoData)
+        setData([])
       } finally {
         setLoading(false)
       }
@@ -94,8 +79,8 @@ export function LeadTrendsChart() {
       case "conversion":
         return data.map((item) => ({
           date: item.date,
-          "Conversion Rate": item.totalLeads > 0 ? ((item.convertedLeads / item.totalLeads) * 100).toFixed(2) : 0,
-          "DNC Rate": item.totalLeads > 0 ? ((item.dncLeads / item.totalLeads) * 100).toFixed(2) : 0,
+          "Conversion Rate": item.totalLeads > 0 ? parseFloat(((item.convertedLeads / item.totalLeads) * 100).toFixed(2)) : 0,
+          "DNC Rate": item.totalLeads > 0 ? parseFloat(((item.dncLeads / item.totalLeads) * 100).toFixed(2)) : 0,
         }))
       default:
         return data.map((item) => ({
@@ -108,6 +93,16 @@ export function LeadTrendsChart() {
   }
 
   const chartData = getChartData()
+
+  // Debug logging
+  console.log("Chart component state:", {
+    dataLength: data.length,
+    chartDataLength: chartData.length,
+    period,
+    viewMode,
+    sampleData: data.slice(0, 2),
+    sampleChartData: chartData.slice(0, 2)
+  })
 
   return (
     <Card>
@@ -146,36 +141,101 @@ export function LeadTrendsChart() {
           <div className="h-[400px] flex items-center justify-center">
             <p className="text-muted-foreground">Loading trends...</p>
           </div>
+        ) : data.length === 0 ? (
+          <div className="h-[400px] flex items-center justify-center">
+            <p className="text-muted-foreground">No data available</p>
+          </div>
         ) : (
-          <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              {viewMode === "leads" && (
-                <>
-                  <Line type="monotone" dataKey="Total Leads" stroke="#3b82f6" strokeWidth={2} />
-                  <Line type="monotone" dataKey="Converted" stroke="#10b981" strokeWidth={2} />
-                  <Line type="monotone" dataKey="DNC" stroke="#ef4444" strokeWidth={2} />
-                </>
-              )}
-              {viewMode === "revenue" && (
-                <>
-                  <Line type="monotone" dataKey="Revenue" stroke="#10b981" strokeWidth={2} />
-                  <Line type="monotone" dataKey="Cost" stroke="#ef4444" strokeWidth={2} />
-                  <Line type="monotone" dataKey="Profit" stroke="#3b82f6" strokeWidth={2} />
-                </>
-              )}
-              {viewMode === "conversion" && (
-                <>
-                  <Line type="monotone" dataKey="Conversion Rate" stroke="#10b981" strokeWidth={2} />
-                  <Line type="monotone" dataKey="DNC Rate" stroke="#ef4444" strokeWidth={2} />
-                </>
-              )}
-            </LineChart>
-          </ResponsiveContainer>
+          <div className="h-[400px]">
+            <ResponsiveContainer width="100%" height={400}>
+              <BarChart
+                data={chartData}
+                margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 12 }}
+                  interval={0}
+                />
+                <YAxis
+                  tick={{ fontSize: 12 }}
+                  allowDecimals={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'white',
+                    border: '1px solid #ccc',
+                    borderRadius: '4px'
+                  }}
+                />
+                <Legend />
+
+                {viewMode === "leads" && (
+                  <>
+                    <Bar
+                      dataKey="Total Leads"
+                      fill="#3b82f6"
+                      name="Total Leads"
+                      radius={[2, 2, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="Converted"
+                      fill="#10b981"
+                      name="Converted"
+                      radius={[2, 2, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="DNC"
+                      fill="#ef4444"
+                      name="DNC"
+                      radius={[2, 2, 0, 0]}
+                    />
+                  </>
+                )}
+
+                {viewMode === "revenue" && (
+                  <>
+                    <Bar
+                      dataKey="Revenue"
+                      fill="#10b981"
+                      name="Revenue"
+                      radius={[2, 2, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="Cost"
+                      fill="#ef4444"
+                      name="Cost"
+                      radius={[2, 2, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="Profit"
+                      fill="#3b82f6"
+                      name="Profit"
+                      radius={[2, 2, 0, 0]}
+                    />
+                  </>
+                )}
+
+                {viewMode === "conversion" && (
+                  <>
+                    <Bar
+                      dataKey="Conversion Rate"
+                      fill="#10b981"
+                      name="Conversion Rate (%)"
+                      radius={[2, 2, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="DNC Rate"
+                      fill="#ef4444"
+                      name="DNC Rate (%)"
+                      radius={[2, 2, 0, 0]}
+                    />
+                  </>
+                )}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         )}
       </CardContent>
     </Card>

@@ -11,14 +11,16 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { supabase } from "@/lib/supabase/client"
+import { useAuth } from "@/lib/auth-context"
+import { RedirectAfterLogin } from "@/components/auth/redirect-after-login"
 
 export default function LoginPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const registered = searchParams?.get("registered") === "true"
+  const { login, user } = useAuth()
 
-  const [email, setEmail] = useState("")
+  const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -29,16 +31,9 @@ export default function LoginPage() {
     setError(null)
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
-
-      if (error) {
-        throw error
-      }
-
-      router.push("/dashboard")
+      await login(username, password)
+      console.log('Login successful, redirect will be handled by RedirectAfterLogin component')
+      // Don't manually redirect here - let the RedirectAfterLogin component handle it
     } catch (err: any) {
       setError(err.message || "Failed to login")
     } finally {
@@ -48,6 +43,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+      <RedirectAfterLogin />
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold">Login</CardTitle>
@@ -70,13 +66,13 @@ export default function LoginPage() {
               </Alert>
             )}
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="username">Username</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="name@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="username"
+                type="text"
+                placeholder="Enter your username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 required
               />
             </div>

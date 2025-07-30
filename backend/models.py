@@ -172,6 +172,8 @@ class UploadBatch(BaseModel):
     processingprogress: int = 0
     supplierid: Optional[int] = None
     sourcename: Optional[str] = None
+    total_buying_price: float = 0.0
+    buying_price_per_lead: float = 0.0
     createdat: datetime = Field(default_factory=datetime.now)
     completedat: Optional[datetime] = None
 
@@ -181,7 +183,7 @@ class Supplier(BaseModel):
     contactperson: Optional[str] = None
     apikey: Optional[str] = None
     status: str = "Active"
-    leadcost: Optional[str] = None
+    leadcost: Optional[float] = None
     createdat: datetime = Field(default_factory=datetime.now)
 
 class Client(BaseModel):
@@ -189,26 +191,26 @@ class Client(BaseModel):
     email: str
     phone: Optional[str] = None
     contactperson: Optional[str] = None
-    deliveryformat: str = "CSV"
-    deliveryschedule: str = "Manual"
+    deliveryformat: Optional[str] = None
+    deliveryschedule: Optional[str] = None
     percentallocation: Optional[int] = None
     fixedallocation: Optional[int] = None
     exclusivitysettings: Optional[Dict[str, Any]] = None
-    isactive: bool = True
+    isactive: Optional[bool] = True
     createdat: datetime = Field(default_factory=datetime.now)
 
 class DNCList(BaseModel):
     name: str
     type: str
     description: Optional[str] = None
-    isactive: bool = True
+    isactive: Optional[bool] = True
     createdat: datetime = Field(default_factory=datetime.now)
-    lastupdated: datetime = Field(default_factory=datetime.now)
+    lastupdated: Optional[datetime] = None
 
 class DNCEntry(BaseModel):
     value: str
     valuetype: str
-    source: str
+    source: Optional[str] = None
     reason: Optional[str] = None
     dnclistid: int
     createdat: datetime = Field(default_factory=datetime.now)

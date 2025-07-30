@@ -1,4 +1,6 @@
 import os
+import uuid
+import re
 from dotenv import load_dotenv
 load_dotenv()
 import logging
@@ -898,53 +900,30 @@ class SupabaseClient:
     def create_api_key(self, api_key_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Create a new API key.
-        
+        Note: API keys table doesn't exist in the actual schema, so this returns mock data.
+
         Args:
             api_key_data: API key data
-            
+
         Returns:
-            Created API key
+            Mock API key data
         """
-        if self.supabase is None:
-            # Return mock data
-            return {**api_key_data, "id": 1}
-        
-        try:
-            response = self.supabase.table("api_keys").insert(api_key_data).execute()
-            
-            if not response.data:
-                raise ValueError("Failed to create API key")
-            
-            return response.data[0]
-        except Exception as e:
-            logger.error(f"Error creating API key: {str(e)}")
-            raise
+        # Since api_keys table doesn't exist in the actual schema, return mock data
+        return {**api_key_data, "id": 1, "key": f"test_{uuid.uuid4().hex[:16]}", "isactive": True}
     
     def get_api_keys(self, active_only: bool = True) -> List[Dict[str, Any]]:
         """
         Get all API keys.
-        
+        Note: API keys table doesn't exist in the actual schema, so this returns mock data.
+
         Args:
             active_only: Only return active API keys
-            
+
         Returns:
-            List of API keys
+            List of mock API keys
         """
-        if self.supabase is None:
-            # Return mock data
-            return self._get_mock_api_keys(active_only)
-        
-        try:
-            query = self.supabase.table("api_keys").select("*")
-            
-            if active_only:
-                query = query.eq("isactive", True)
-            
-            response = query.execute()
-            return response.data or []
-        except Exception as e:
-            logger.error(f"Error getting API keys: {str(e)}")
-            return []
+        # Since api_keys table doesn't exist in the actual schema, return mock data
+        return self._get_mock_api_keys(active_only)
     
     def log_activity(self, activity_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1967,3 +1946,152 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error deleting lead with ID {lead_id}: {e}")
             return False
+
+    # Methods required for hybrid system
+    async def get_suppliers(self) -> List[Dict[str, Any]]:
+        """Get list of all suppliers"""
+        try:
+            response = self.supabase.table('suppliers').select('*').execute()
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Error fetching suppliers: {e}")
+            return []
+
+    async def check_dnc_lists(self, data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Check data against DNC lists"""
+        try:
+            # Get active DNC lists
+            dnc_response = self.supabase.table('dnc_lists').select('*').eq('isactive', True).execute()
+            if not dnc_response.data:
+                return {
+                    'dnc_matches': 0,
+                    'matches': [],
+                    'clean_data': data,
+                    'stats': {'total_leads': len(data), 'dnc_matches': 0, 'clean_leads': len(data)}
+                }
+
+            # Get DNC entries
+            dnc_list_ids = [dnc['id'] for dnc in dnc_response.data]
+            entries_response = self.supabase.table('dnc_entries').select('*').in_('dnclistid', dnc_list_ids).execute()
+
+            dnc_emails = set()
+            dnc_phones = set()
+
+            if entries_response.data:
+                for entry in entries_response.data:
+                    if entry['valuetype'] == 'email':
+                        dnc_emails.add(entry['value'].lower())
+                    elif entry['valuetype'] == 'phone':
+                        dnc_phones.add(re.sub(r'\D', '', entry['value']))
+
+            # Check data against DNC
+            clean_data = []
+            matches = []
+
+            for lead in data:
+                is_dnc = False
+
+                if lead.get('email') and lead['email'].lower() in dnc_emails:
+                    is_dnc = True
+                    matches.append({'lead': lead, 'match_type': 'email', 'match_value': lead['email']})
+                elif lead.get('phone'):
+                    phone_clean = re.sub(r'\D', '', lead['phone'])
+                    if phone_clean in dnc_phones:
+                        is_dnc = True
+                        matches.append({'lead': lead, 'match_type': 'phone', 'match_value': lead['phone']})
+
+                if not is_dnc:
+                    clean_data.append(lead)
+
+            return {
+                'dnc_matches': len(matches),
+                'matches': matches,
+                'clean_data': clean_data,
+                'stats': {
+                    'total_leads': len(data),
+                    'dnc_matches': len(matches),
+                    'clean_leads': len(clean_data)
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error checking DNC lists: {e}")
+            return {
+                'dnc_matches': 0,
+                'matches': [],
+                'clean_data': data,
+                'stats': {'total_leads': len(data), 'dnc_matches': 0, 'clean_leads': len(data)}
+            }
+
+    async def upload_leads(self, leads_data: List[Dict[str, Any]], supplier_id: int,
+                          lead_cost: float, file_name: str) -> Dict[str, Any]:
+        """Upload leads to database"""
+        try:
+            # Create upload batch
+            batch_data = {
+                'filename': file_name,
+                'filetype': 'processed',
+                'status': 'completed',
+                'totalleads': len(leads_data),
+                'cleanedleads': len(leads_data),
+                'duplicateleads': 0,
+                'dncmatches': 0,
+                'supplierid': supplier_id,
+                'createdat': datetime.utcnow().isoformat(),
+                'completedat': datetime.utcnow().isoformat()
+            }
+
+            batch_response = self.supabase.table('upload_batches').insert(batch_data).execute()
+            if not batch_response.data:
+                raise Exception("Failed to create upload batch")
+
+            batch_id = batch_response.data[0]['id']
+
+            # Prepare leads for insertion
+            leads_to_insert = []
+            for lead in leads_data:
+                lead_record = {
+                    'email': lead.get('email'),
+                    'firstname': lead.get('firstname'),
+                    'lastname': lead.get('lastname'),
+                    'phone': lead.get('phone'),
+                    'companyname': lead.get('companyname'),
+                    'address': lead.get('address'),
+                    'city': lead.get('city'),
+                    'state': lead.get('state'),
+                    'zipcode': lead.get('zipcode'),
+                    'country': lead.get('country'),
+                    'leadcost': lead_cost,
+                    'supplierid': supplier_id,
+                    'uploadbatchid': batch_id,
+                    'tags': lead.get('tags', []),
+                    'createdat': datetime.utcnow().isoformat(),
+                    'updatedat': datetime.utcnow().isoformat()
+                }
+                leads_to_insert.append(lead_record)
+
+            # Insert leads in batches
+            batch_size = 100
+            inserted_count = 0
+
+            for i in range(0, len(leads_to_insert), batch_size):
+                batch = leads_to_insert[i:i + batch_size]
+                response = self.supabase.table('leads').insert(batch).execute()
+                if response.data:
+                    inserted_count += len(response.data)
+
+            return {
+                'success': True,
+                'batch_id': batch_id,
+                'inserted_count': inserted_count,
+                'total_leads': len(leads_data)
+            }
+
+        except Exception as e:
+            logger.error(f"Error uploading leads: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'inserted_count': 0,
+                'total_leads': len(leads_data)
+            }

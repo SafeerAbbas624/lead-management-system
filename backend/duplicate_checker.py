@@ -78,4 +78,30 @@ class DuplicateChecker:
     
     def calculate_similarity(self, str1: str, str2: str) -> float:
         """Calculate similarity between two strings."""
-        return SequenceMatcher(None, str1.lower(), str2.lower()).ratio() 
+        return SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
+
+    # Method required for hybrid system
+    async def check_duplicates(self, data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Check for duplicates and return results in hybrid system format"""
+
+        # Use existing find_duplicates method
+        unique_leads, duplicate_leads = self.find_duplicates(data)
+
+        # Calculate statistics
+        stats = {
+            'total_leads': len(data),
+            'duplicate_count': len(duplicate_leads),
+            'clean_leads': len(unique_leads),
+            'file_internal_duplicates': len(duplicate_leads),  # All duplicates are internal for now
+            'database_duplicates': 0,  # Would need database integration
+            'email_duplicates': len([d for d in duplicate_leads if d.get('email')]),
+            'phone_duplicates': len([d for d in duplicate_leads if d.get('phone')]),
+        }
+
+        return {
+            'success': True,
+            'duplicate_count': len(duplicate_leads),
+            'duplicates': duplicate_leads,
+            'clean_data': unique_leads,
+            'stats': stats
+        }

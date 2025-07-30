@@ -9,8 +9,9 @@ import { Plus, Search, Building2, Users, DollarSign, TrendingUp, Upload } from "
 import { Client } from "@/types/client"
 import { ClientDialog } from "@/app/components/clients/client-dialog"
 import { ClientCard } from "@/app/components/clients/client-card"
-import { toast } from "@/components/ui/use-toast"
+import { useToast } from "@/hooks/use-toast"
 import { Toaster } from "@/components/ui/toaster"
+import { RoleGuard } from "@/components/auth/role-guard"
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([])
@@ -20,6 +21,7 @@ export default function ClientsPage() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [activeTab, setActiveTab] = useState('form');
   const router = useRouter()
+  const { toast } = useToast()
 
   useEffect(() => {
     fetchClients()
@@ -243,8 +245,9 @@ export default function ClientsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <Toaster />
+    <RoleGuard requiredPermission="canManageClients">
+      <div className="space-y-6">
+        <Toaster />
       <div className="flex flex-col space-y-4">
         <div>
           <h1 className="text-3xl font-bold">Client Management</h1>
@@ -405,6 +408,7 @@ export default function ClientsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </RoleGuard>
   )
 }

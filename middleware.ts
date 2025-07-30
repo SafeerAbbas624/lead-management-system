@@ -44,11 +44,15 @@ export async function middleware(request: NextRequest) {
   )
 
   try {
-    // Get the session
-    const { data: { session } } = await supabase.auth.getSession()
+    console.log('Middleware processing:', request.nextUrl.pathname)
+
+    // For our custom auth, check the auth-token cookie instead of Supabase session
+    const authToken = request.cookies.get('auth-token')?.value
+    console.log('Auth token exists:', !!authToken)
 
     // If user is not signed in and the current path is not /login, redirect to /login
-    if (!session && !request.nextUrl.pathname.startsWith('/login')) {
+    if (!authToken && !request.nextUrl.pathname.startsWith('/login') && !request.nextUrl.pathname.startsWith('/api')) {
+      console.log('No auth token, redirecting to login')
       const redirectUrl = request.nextUrl.clone()
       redirectUrl.pathname = '/login'
       redirectUrl.searchParams.set('redirectedFrom', request.nextUrl.pathname)
@@ -56,10 +60,12 @@ export async function middleware(request: NextRequest) {
     }
 
     // If user is signed in and the current path is /login, redirect to /dashboard
-    if (session && request.nextUrl.pathname === '/login') {
+    if (authToken && request.nextUrl.pathname === '/login') {
+      console.log('User has auth token but on login page, redirecting to dashboard')
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }
 
+    console.log('Middleware allowing request to continue')
     return response
   } catch (error) {
     console.error('Error in middleware:', error)

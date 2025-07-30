@@ -92,7 +92,11 @@ const DNC_VALUES = new Set(["yes", "y", "true", "1", "do not call", "dnc"])
 
 const BACKEND_URL = "http://localhost:8000"
 
-export function FileUploader() {
+interface FileUploaderProps {
+  onFileSelect?: (file: File) => void
+}
+
+export function FileUploader({ onFileSelect }: FileUploaderProps) {
   const router = useRouter()
   const { toast } = useToast()
 
@@ -182,6 +186,11 @@ export function FileUploader() {
       setFileData(null)
       setError(null)
       setCurrentStep("upload")
+
+      // Call the onFileSelect callback if provided
+      if (onFileSelect) {
+        onFileSelect(selectedFile)
+      }
 
       // Reset all states
       setDuplicateChecks([])
@@ -683,33 +692,7 @@ export function FileUploader() {
         </Alert>
       )}
 
-      {/* Processing Steps */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Processing Pipeline</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {processingSteps.map((step, index) => (
-              <div key={step.id} className="flex items-center space-x-3">
-                {getStepIcon(step.status)}
-                <span
-                  className={`flex-1 ${step.status === "completed" ? "text-green-700" : step.status === "error" ? "text-red-700" : ""}`}
-                >
-                  {step.name}
-                </span>
-                {step.message && <span className="text-sm text-muted-foreground">{step.message}</span>}
-              </div>
-            ))}
-          </div>
-          {progress > 0 && (
-            <div className="mt-4">
-              <Progress value={progress} />
-              <p className="text-sm text-muted-foreground mt-1">{progress}% complete</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+
 
       {/* File Upload */}
       {currentStep === "upload" && (
@@ -748,9 +731,7 @@ export function FileUploader() {
               </label>
             </div>
 
-            <Button onClick={handleFileUpload} disabled={!file || uploading} className="w-full">
-              {uploading ? "Processing..." : "Start Processing"}
-            </Button>
+
           </CardContent>
         </Card>
       )}

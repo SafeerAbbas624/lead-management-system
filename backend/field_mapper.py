@@ -59,6 +59,49 @@ class FieldMapper:
                 mapping[best_match] = header
         
         return mapping
+
+    # Methods required for hybrid system
+    async def get_mapping_rules(self) -> Dict[str, Any]:
+        """Get field mapping rules and database field definitions"""
+        return {
+            'database_fields': self.field_patterns,
+            'field_variations': self.field_patterns,
+            'mapping_rules': {
+                'case_sensitive': False,
+                'trim_whitespace': True,
+                'remove_special_chars': True,
+                'fuzzy_matching': True,
+                'confidence_threshold': 0.7,
+            }
+        }
+
+    async def get_manual_mapping(self, header: str) -> Optional[str]:
+        """Get manual mapping for a specific header if it exists"""
+        # Check if header matches any known patterns
+        header_lower = header.lower().strip()
+        for field, patterns in self.field_patterns.items():
+            if header_lower in [p.lower() for p in patterns]:
+                return field
+        return None
+
+    async def auto_map_fields(self, headers: List[str]) -> Dict[str, Any]:
+        """Perform automatic field mapping using existing logic"""
+        mapped_fields = self.map_fields(headers)
+
+        unmapped_headers = [h for h in headers if h not in mapped_fields]
+        confidence = len(mapped_fields) / len(headers) if headers else 0
+
+        return {
+            'mapped_fields': mapped_fields,
+            'unmapped_headers': unmapped_headers,
+            'confidence': confidence,
+            'stats': {
+                'total_headers': len(headers),
+                'mapped_headers': len(mapped_fields),
+                'unmapped_headers': len(unmapped_headers),
+                'mapping_confidence': confidence,
+            }
+        }
     
     def _calculate_similarity(self, source: str, target_patterns: List[str]) -> float:
         """Calculate similarity between source and target patterns."""

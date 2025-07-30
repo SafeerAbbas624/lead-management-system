@@ -1285,3 +1285,81 @@ class DataProcessor:
         )
         
         return performance
+
+    # Methods required for hybrid system
+    async def clean_data(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Clean data using existing processing methods"""
+        try:
+            # Convert to DataFrame for processing
+            df = pd.DataFrame(data)
+
+            # Apply existing cleaning methods
+            df = self.clean_and_validate_data(df)
+
+            # Convert back to list of dictionaries
+            return df.to_dict('records')
+        except Exception as e:
+            logger.error(f"Error cleaning data: {e}")
+            return data  # Return original data if cleaning fails
+
+    async def normalize_data(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Normalize data formats"""
+        try:
+            normalized_data = []
+
+            for row in data:
+                normalized_row = row.copy()
+
+                # Normalize phone numbers
+                if 'phone' in normalized_row and normalized_row['phone']:
+                    normalized_row['phone'] = validate_and_format_phone(normalized_row['phone'])
+
+                # Normalize emails
+                if 'email' in normalized_row and normalized_row['email']:
+                    normalized_row['email'] = validate_and_format_email(normalized_row['email'])
+
+                # Normalize names (title case)
+                for field in ['firstname', 'lastname']:
+                    if field in normalized_row and normalized_row[field]:
+                        normalized_row[field] = normalized_row[field].strip().title()
+
+                normalized_data.append(normalized_row)
+
+            return normalized_data
+        except Exception as e:
+            logger.error(f"Error normalizing data: {e}")
+            return data
+
+    async def apply_lead_tags(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Apply automatic lead tags"""
+        try:
+            tagged_data = []
+
+            for row in data:
+                tagged_row = row.copy()
+                tags = []
+
+                # Tag based on exclusivity
+                if any(field in str(row.get(key, '')).lower() for key in row.keys()
+                      for field in ['exclu', 'exclusive', 'exclusivity']):
+                    tags.append('exclusive')
+
+                # Tag based on company presence
+                if row.get('companyname'):
+                    tags.append('business')
+
+                # Tag based on phone presence
+                if row.get('phone'):
+                    tags.append('phone-contact')
+
+                # Tag based on email presence
+                if row.get('email'):
+                    tags.append('email-contact')
+
+                tagged_row['tags'] = tags
+                tagged_data.append(tagged_row)
+
+            return tagged_data
+        except Exception as e:
+            logger.error(f"Error applying tags: {e}")
+            return data

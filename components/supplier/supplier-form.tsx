@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { toast } from "@/components/ui/use-toast"
+import { useToast } from "@/hooks/use-toast"
 import { Loader2, Copy, Check } from "lucide-react"
 
 const supplierFormSchema = z.object({
@@ -49,8 +49,9 @@ export const SupplierForm = forwardRef<SupplierFormRef, SupplierFormProps>(({
   onCancel 
 }, ref) => {
   const [loading, setLoading] = useState(false)
-  const [apiKey, setApiKey] = useState(initialData?.api_key || "")
+  const [apiKey, setApiKey] = useState(initialData?.apikey || "")
   const [copied, setCopied] = useState(false)
+  const { toast } = useToast()
 
   const form = useForm<SupplierFormValues>({
     resolver: zodResolver(supplierFormSchema),
@@ -178,12 +179,12 @@ export const SupplierForm = forwardRef<SupplierFormRef, SupplierFormProps>(({
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <span className="text-gray-500 sm:text-sm">$</span>
                     </div>
-                    <Input 
-                      type="number" 
-                      step="0.01" 
-                      placeholder="0.00" 
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
                       className="pl-7"
-                      {...field} 
+                      {...field}
                     />
                   </div>
                 </FormControl>

@@ -12,11 +12,12 @@ import { Calendar as CalendarIcon, Download, FileText, BarChart2, Users, Activit
 import { Calendar } from "@/components/ui/calendar"
 import { format as formatDate, subDays } from "date-fns"
 import { DateRange } from "react-day-picker"
-import { toast } from "@/components/ui/use-toast"
+import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 
-type ReportType = 'lead-activity' | 'source-performance' | 'conversion' | 'revenue' | 'all'
-type ReportFormat = 'pdf' | 'csv' | 'excel'
+type ReportType = 'lead-activity' | 'source-performance' | 'conversion' | 'revenue' | 'suppliers' | 'clients' | 'roi-analysis' | 'investment-profit' | 'lead-sources' | 'monthly-summary' | 'weekly-summary' | 'daily-summary' | 'all'
+type ReportFormat = 'pdf' | 'csv'
+
 
 interface Report {
   id: string
@@ -25,9 +26,13 @@ interface Report {
   format: ReportFormat
   date_from: string
   date_to: string
-  status: 'scheduled' | 'completed' | 'failed'
+  status: 'pending' | 'processing' | 'completed' | 'failed'
   created_at: string
   file_name?: string
+  report_category?: string
+  data_summary?: any
+  file_size?: number
+  download_count?: number
 }
 
 export function Reports() {
@@ -41,21 +46,29 @@ export function Reports() {
   const [recentReports, setRecentReports] = useState<Report[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
-  
+  const [selectedCategory, setSelectedCategory] = useState<string>('all')
+
+  // Use toast hook
+  const { toast } = useToast()
+
   // Use auth context
   const { user, isAuthenticated, loading: authLoading } = useAuth()
 
   // Fetch recent reports when user is authenticated
   useEffect(() => {
     let isMounted = true
-    
+
     const fetchRecentReports = async (attempt = 1): Promise<void> => {
       // Only proceed if we're authenticated and have a user
       if (!isAuthenticated || !user) {
         console.log('Not authenticated or no user, skipping report fetch')
+        if (isMounted) {
+          setIsLoading(false)
+          setRecentReports([]) // Set empty array for unauthenticated users
+        }
         return
       }
-      
+
       if (isMounted) {
         setIsLoading(true)
       }
@@ -100,29 +113,25 @@ export function Reports() {
         }
       } catch (error) {
         console.error('Error in fetchRecentReports:', error)
-        
+
         if (isMounted) {
           const errorMessage = error instanceof Error ? error.message : 'Failed to load reports'
-          
-          // Show a more user-friendly error message
-          toast({
-            title: 'Error',
-            description: errorMessage,
-            variant: 'destructive',
-          })
-          
+
+          // Set empty reports array as fallback
+          setRecentReports([])
+
+          // Only show toast for non-auth errors to avoid spam
+          if (!errorMessage.toLowerCase().includes('session') && !errorMessage.includes('401')) {
+            toast({
+              title: 'Reports Unavailable',
+              description: 'Report history could not be loaded. You can still generate new reports.',
+              variant: 'default',
+            })
+          }
+
           // If it's an auth error, suggest signing in again
           if (errorMessage.toLowerCase().includes('session') || errorMessage.includes('401')) {
-            toast({
-              title: 'Authentication Required',
-              description: 'Please sign in again to continue',
-              variant: 'default',
-              action: (
-                <Button variant="outline" onClick={() => window.location.href = '/login'} className="ml-2">
-                  Sign In
-                </Button>
-              ),
-            })
+            console.log('Authentication issue detected, user may need to sign in again')
           }
         }
       } finally {
@@ -198,28 +207,44 @@ export function Reports() {
 
     setIsGenerating(true)
     try {
-      const { data: { session: currentSession } } = await supabase.auth.getSession()
-      
+      console.log('Starting report generation...')
+
       const response = await fetch('/api/reports/generate', {
         method: 'POST',
+        credentials: 'include', // Important for sending cookies
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentSession?.access_token}`
         },
         body: JSON.stringify({
           type: selectedReports.includes('all') ? ['all'] : selectedReports,
           format,
+          scheduleType: 'manual',
           dateRange: {
             from: dateRange.from?.toISOString(),
             to: dateRange.to?.toISOString(),
           },
           name: `Report ${new Date().toLocaleDateString()}`,
+          category: selectedCategory,
         }),
       })
 
+      console.log('Generate response status:', response.status)
+      console.log('Generate response headers:', Object.fromEntries(response.headers.entries()))
+
       if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || 'Failed to generate report')
+        console.error('Response not OK, status:', response.status)
+        const responseText = await response.text()
+        console.error('Response text:', responseText)
+
+        let error
+        try {
+          error = JSON.parse(responseText)
+        } catch {
+          error = { error: `Server error (${response.status}): ${responseText}` }
+        }
+
+        console.error('Generate report error:', error)
+        throw new Error(error.error || `Failed to generate report (${response.status})`)
       }
 
       // Trigger file download
@@ -239,14 +264,11 @@ export function Reports() {
       document.body.removeChild(a)
 
       // Refresh the reports list
-      const { data: { session: newSession } } = await supabase.auth.getSession()
       const refreshResponse = await fetch('/api/reports/recent', {
-        headers: {
-          'Authorization': `Bearer ${newSession?.access_token}`
-        },
+        credentials: 'include',
         cache: 'no-store'
       })
-      
+
       if (refreshResponse.ok) {
         const data = await refreshResponse.json()
         setRecentReports(data)
@@ -285,21 +307,48 @@ export function Reports() {
         return 'PDF'
       case 'csv':
         return 'CSV'
-      case 'excel':
-        return 'Excel'
       default:
         return String(format).toUpperCase()
     }
   }
 
-  // Report type options
-  const reportTypes: { id: ReportType; name: string; icon: React.ReactNode }[] = [
-    { id: 'all', name: 'All Reports', icon: <FileText className="h-4 w-4" /> },
-    { id: 'lead-activity', name: 'Lead Activity', icon: <Activity className="h-4 w-4" /> },
-    { id: 'source-performance', name: 'Source Performance', icon: <BarChart2 className="h-4 w-4" /> },
-    { id: 'conversion', name: 'Conversion', icon: <Users className="h-4 w-4" /> },
-    { id: 'revenue', name: 'Revenue', icon: <BarChart2 className="h-4 w-4" /> },
+  // Report categories
+  const reportCategories = [
+    { id: 'all', name: 'All Categories' },
+    { id: 'leads', name: 'Leads & Activity' },
+    { id: 'financial', name: 'Financial & ROI' },
+    { id: 'performance', name: 'Performance & Analytics' },
+    { id: 'summary', name: 'Summary Reports' },
   ]
+
+  // Report type options organized by category
+  const reportTypes: { id: ReportType; name: string; icon: React.ReactNode; category: string; description: string }[] = [
+    { id: 'all', name: 'All Reports', icon: <FileText className="h-4 w-4" />, category: 'all', description: 'Complete comprehensive report' },
+
+    // Leads & Activity
+    { id: 'lead-activity', name: 'Lead Activity', icon: <Activity className="h-4 w-4" />, category: 'leads', description: 'Lead creation, updates, and status changes' },
+    { id: 'lead-sources', name: 'Lead Sources', icon: <BarChart2 className="h-4 w-4" />, category: 'leads', description: 'Lead distribution by source and supplier' },
+    { id: 'conversion', name: 'Conversion Analysis', icon: <Users className="h-4 w-4" />, category: 'leads', description: 'Lead conversion rates and funnel analysis' },
+
+    // Financial & ROI
+    { id: 'revenue', name: 'Revenue Analysis', icon: <BarChart2 className="h-4 w-4" />, category: 'financial', description: 'Revenue breakdown by source and client' },
+    { id: 'roi-analysis', name: 'ROI Analysis', icon: <BarChart2 className="h-4 w-4" />, category: 'financial', description: 'Return on investment by supplier and campaign' },
+    { id: 'investment-profit', name: 'Investment vs Profit', icon: <BarChart2 className="h-4 w-4" />, category: 'financial', description: 'Cost analysis and profit margins' },
+
+    // Performance & Analytics
+    { id: 'source-performance', name: 'Source Performance', icon: <BarChart2 className="h-4 w-4" />, category: 'performance', description: 'Supplier and source quality metrics' },
+    { id: 'clients', name: 'Client Analysis', icon: <Users className="h-4 w-4" />, category: 'performance', description: 'Client distribution and satisfaction metrics' },
+
+    // Summary Reports
+    { id: 'daily-summary', name: 'Daily Summary', icon: <FileText className="h-4 w-4" />, category: 'summary', description: 'Daily operations and key metrics' },
+    { id: 'weekly-summary', name: 'Weekly Summary', icon: <FileText className="h-4 w-4" />, category: 'summary', description: 'Weekly performance overview' },
+    { id: 'monthly-summary', name: 'Monthly Summary', icon: <FileText className="h-4 w-4" />, category: 'summary', description: 'Monthly business intelligence report' },
+  ]
+
+  // Filter report types by selected category
+  const filteredReportTypes = selectedCategory === 'all'
+    ? reportTypes
+    : reportTypes.filter(type => type.category === selectedCategory || type.id === 'all')
 
   // Show loading state while checking auth
   if (authLoading) {
@@ -411,21 +460,45 @@ export function Reports() {
               <CardDescription>Select report type, date range, and format</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* Report Category Selection */}
+              <div>
+                <h3 className="text-sm font-medium mb-2">Report Category</h3>
+                <div className="flex flex-wrap gap-2">
+                  {reportCategories.map((category) => (
+                    <Button
+                      key={category.id}
+                      variant={selectedCategory === category.id ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSelectedCategory(category.id)}
+                    >
+                      {category.name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
               {/* Report Type Selection */}
               <div>
                 <h3 className="text-sm font-medium mb-2">Report Type</h3>
-                <div className="flex flex-wrap gap-2">
-                  {reportTypes.map((type) => (
-                    <Button
+                <div className="grid gap-3 md:grid-cols-2">
+                  {filteredReportTypes.map((type) => (
+                    <div
                       key={type.id}
-                      variant={selectedReports.includes(type.id) ? 'default' : 'outline'}
-                      size="sm"
-                      className="gap-2"
+                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                        selectedReports.includes(type.id)
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-primary/50'
+                      }`}
                       onClick={() => handleReportSelection(type.id)}
                     >
-                      {type.icon}
-                      {type.name}
-                    </Button>
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5">{type.icon}</div>
+                        <div className="flex-1">
+                          <div className="font-medium text-sm">{type.name}</div>
+                          <div className="text-xs text-muted-foreground mt-1">{type.description}</div>
+                        </div>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -497,7 +570,7 @@ export function Reports() {
               <div>
                 <h3 className="text-sm font-medium mb-2">Format</h3>
                 <div className="flex flex-wrap gap-2">
-                  {['pdf', 'csv', 'excel'].map((fmt) => (
+                  {['pdf', 'csv'].map((fmt) => (
                     <Button
                       key={fmt}
                       variant={format === fmt ? 'default' : 'outline'}
@@ -509,6 +582,8 @@ export function Reports() {
                   ))}
                 </div>
               </div>
+
+
             </CardContent>
             <CardFooter className="flex justify-end border-t px-6 py-4">
               <Button

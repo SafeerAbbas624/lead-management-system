@@ -2,26 +2,25 @@
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id SERIAL PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
+  password TEXT NOT NULL,
   fullName TEXT,
-  email TEXT NOT NULL UNIQUE,
-  role TEXT NOT NULL DEFAULT 'viewer',
-  createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updatedAt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  email TEXT,
+  role TEXT NOT NULL,
+  createdAt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 -- Suppliers table
 CREATE TABLE IF NOT EXISTS suppliers (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
-  email TEXT,
-  contactPerson TEXT,
-  apiKey TEXT,
-  status TEXT NOT NULL DEFAULT 'Active',
-  leadCost DECIMAL(10, 2),
-  createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updatedAt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  email TEXT NOT NULL,
+  contactperson TEXT,
+  apikey TEXT,
+  status TEXT CHECK (status = ANY (ARRAY['Active'::text, 'Inactive'::text])),
+  leadcost NUMERIC,
+  createdat TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 -- Upload batches table
@@ -116,11 +115,11 @@ CREATE TABLE IF NOT EXISTS lead_distributions (
 -- -- Create some initial data
 
 -- -- Insert suppliers
-INSERT INTO suppliers (name, email, contactPerson, apiKey, status, leadCost, "createdAt", "updatedAt")
+INSERT INTO suppliers (name, email, contactperson, apikey, status, leadcost, createdat)
 VALUES
-  ('Lead Gen Pro', 'contact@leadgenpro.com', 'Sarah Sales', 'lgp_api_12345', 'Active', 2.50, NOW(), NOW()),
-  ('Data Partners Inc', 'info@datapartners.com', 'Mike Marketing', 'dpi_api_67890', 'Active', 3.00, NOW(), NOW()),
-  ('LeadSource Direct', 'support@leadsource.com', 'Lisa Leads', 'lsd_api_54321', 'Inactive', 1.75, NOW(), NOW());
+  ('Lead Gen Pro', 'contact@leadgenpro.com', 'Sarah Sales', 'lgp_api_12345', 'Active', 2.50, NOW()),
+  ('Data Partners Inc', 'info@datapartners.com', 'Mike Marketing', 'dpi_api_67890', 'Active', 3.00, NOW()),
+  ('LeadSource Direct', 'support@leadsource.com', 'Lisa Leads', 'lsd_api_54321', 'Inactive', 1.75, NOW());
 
 -- -- Insert DNC lists
 INSERT INTO dnc_lists (name, type, description, isActive, "createdAt", "lastUpdated")

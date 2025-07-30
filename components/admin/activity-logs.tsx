@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Search, Download, Filter } from "lucide-react"
+import { RoleGuard } from "@/components/auth/role-guard"
 
 interface ActivityLog {
   id: string
@@ -25,82 +26,52 @@ interface ActivityLog {
 export function ActivityLogs() {
   const [logs, setLogs] = useState<ActivityLog[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [activityTypeFilter, setActivityTypeFilter] = useState<string>("all")
   const [resourceTypeFilter, setResourceTypeFilter] = useState<string>("all")
 
   useEffect(() => {
     fetchActivityLogs()
-  }, [])
+  }, [activityTypeFilter, resourceTypeFilter])
 
   const fetchActivityLogs = async () => {
     try {
-      // Mock data for now
-      const mockLogs: ActivityLog[] = [
-        {
-          id: "1",
-          activityType: "create",
-          userId: "user123",
-          userName: "John Admin",
-          resourceType: "lead",
-          resourceId: "lead456",
-          details: { source: "CSV Upload", batchId: "batch789" },
-          ipAddress: "192.168.1.1",
-          userAgent: "Mozilla/5.0 Chrome/90.0",
-          timestamp: "2023-05-15T10:30:00Z",
-        },
-        {
-          id: "2",
-          activityType: "update",
-          userId: "user456",
-          userName: "Jane Manager",
-          resourceType: "user",
-          resourceId: "user789",
-          details: { field: "role", oldValue: "viewer", newValue: "manager" },
-          ipAddress: "192.168.1.2",
-          userAgent: "Mozilla/5.0 Firefox/88.0",
-          timestamp: "2023-05-16T14:45:00Z",
-        },
-        {
-          id: "3",
-          activityType: "delete",
-          userId: "user123",
-          userName: "John Admin",
-          resourceType: "dnc_entry",
-          resourceId: "dnc123",
-          details: { value: "example@gmail.com", reason: "User request" },
-          ipAddress: "192.168.1.1",
-          userAgent: "Mozilla/5.0 Chrome/90.0",
-          timestamp: "2023-05-17T09:15:00Z",
-        },
-        {
-          id: "4",
-          activityType: "login",
-          userId: "user789",
-          userName: "Bob Viewer",
-          resourceType: "auth",
-          resourceId: "session123",
-          details: { method: "password" },
-          ipAddress: "192.168.1.3",
-          userAgent: "Mozilla/5.0 Safari/605.1.15",
-          timestamp: "2023-05-18T16:20:00Z",
-        },
-        {
-          id: "5",
-          activityType: "distribute_leads",
-          userId: "user456",
-          userName: "Jane Manager",
-          resourceType: "batch",
-          resourceId: "batch456",
-          details: { clientIds: ["client1", "client2"], totalLeads: 150 },
-          ipAddress: "192.168.1.2",
-          userAgent: "Mozilla/5.0 Firefox/88.0",
-          timestamp: "2023-05-19T11:10:00Z",
-        },
-      ]
-      setLogs(mockLogs)
+      setLoading(true)
+      setError(null)
+
+      // Build query parameters
+      const params = new URLSearchParams({
+        limit: '100'
+      })
+
+      if (activityTypeFilter && activityTypeFilter !== 'all') {
+        params.append('activityType', activityTypeFilter)
+      }
+
+      if (resourceTypeFilter && resourceTypeFilter !== 'all') {
+        params.append('resourceType', resourceTypeFilter)
+      }
+
+      const response = await fetch(`/api/admin/activity-logs?${params}`)
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+
+      if (result.success) {
+        setLogs(result.data || [])
+      } else {
+        setError(result.error || 'Failed to fetch activity logs')
+        setLogs([])
+      }
     } catch (error) {
       console.error("Error fetching activity logs:", error)
+      setError(error instanceof Error ? error.message : 'Failed to fetch activity logs')
+      setLogs([])
     } finally {
       setLoading(false)
     }
@@ -185,8 +156,29 @@ export function ActivityLogs() {
     return <div className="p-6">Loading activity logs...</div>
   }
 
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h3 className="text-red-800 font-medium">Error Loading Activity Logs</h3>
+          <p className="text-red-600 mt-2">{error}</p>
+          <p className="text-sm text-red-500 mt-2">
+            The activity logs table may not exist. Please contact your administrator to set up the database schema.
+          </p>
+          <button
+            onClick={fetchActivityLogs}
+            className="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-6">
+    <RoleGuard requiredPermission="canViewActivityLogs">
+      <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Activity Logs</h2>
@@ -288,6 +280,7 @@ export function ActivityLogs() {
           </div>
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </RoleGuard>
   )
 }

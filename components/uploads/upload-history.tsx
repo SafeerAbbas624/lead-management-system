@@ -12,8 +12,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Download, MoreHorizontal, RefreshCw } from "lucide-react"
+import { MoreHorizontal, Eye, ChevronLeft, ChevronRight } from "lucide-react"
 import { format } from "date-fns"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import BatchDetailsModal from "./BatchDetailsModal"
 
 interface UploadBatch {
@@ -26,6 +27,8 @@ interface UploadBatch {
   duplicateLeads: number
   dncMatches: number
   sourceName: string
+  totalBuyingPrice: number
+  buyingPricePerLead: number
   createdAt: string
   completedAt: string | null
 }
@@ -36,6 +39,16 @@ export function UploadHistory() {
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedBatch, setSelectedBatch] = useState<any | null>(null)
   const [detailsLoading, setDetailsLoading] = useState(false)
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(10)
+
+  // Calculate pagination
+  const totalPages = Math.ceil(uploads.length / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const currentUploads = uploads.slice(startIndex, endIndex)
 
   useEffect(() => {
     const fetchUploads = async () => {
@@ -55,6 +68,8 @@ export function UploadHistory() {
           duplicateLeads: b.duplicateleads,
           dncMatches: b.dncmatches,
           sourceName: b.sourcename,
+          totalBuyingPrice: b.total_buying_price || 0,
+          buyingPricePerLead: b.buying_price_per_lead || 0,
           createdAt: b.createdat,
           completedAt: b.completedat,
         }))
@@ -71,6 +86,7 @@ export function UploadHistory() {
     fetchUploads()
   }, [])
 
+  // Unused - keeping for potential future use
   const handleReprocess = async (id: number) => {
     try {
       const res = await fetch(`/api/reprocess-batch/${id}`, { method: "POST" })
@@ -92,6 +108,8 @@ export function UploadHistory() {
           duplicateLeads: b.duplicateleads,
           dncMatches: b.dncmatches,
           sourceName: b.sourcename,
+          totalBuyingPrice: b.total_buying_price || 0,
+          buyingPricePerLead: b.buying_price_per_lead || 0,
           createdAt: b.createdat,
           completedAt: b.completedat,
         }))
@@ -105,6 +123,7 @@ export function UploadHistory() {
     }
   }
 
+  // Unused - keeping for potential future use
   const handleDownload = async (id: number) => {
     try {
       const res = await fetch(`/api/download-batch/${id}`)
@@ -159,23 +178,75 @@ export function UploadHistory() {
 
   return (
     <>
-      <div className="rounded-md border">
+      {/* Pagination Controls */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center space-x-2">
+          <span className="text-sm text-muted-foreground">Show</span>
+          <Select value={itemsPerPage.toString()} onValueChange={(value) => {
+            setItemsPerPage(Number(value))
+            setCurrentPage(1) // Reset to first page when changing items per page
+          }}>
+            <SelectTrigger className="w-20">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="25">25</SelectItem>
+              <SelectItem value="50">50</SelectItem>
+              <SelectItem value="100">100</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className="text-sm text-muted-foreground">entries</span>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <span className="text-sm text-muted-foreground">
+            Showing {startIndex + 1} to {Math.min(endIndex, uploads.length)} of {uploads.length} entries
+          </span>
+          <div className="flex items-center space-x-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm px-2">
+              Page {currentPage} of {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+              disabled={currentPage === totalPages}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Table with sticky header */}
+      <div className="rounded-md border max-h-[600px] overflow-auto">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 bg-background z-10">
             <TableRow>
-              <TableHead>File Name</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Total Leads</TableHead>
-              <TableHead>Clean Leads</TableHead>
-              <TableHead>Duplicates</TableHead>
-              <TableHead>DNC Matches</TableHead>
-              <TableHead>Upload Date</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="bg-background">File Name</TableHead>
+              <TableHead className="bg-background">Source</TableHead>
+              <TableHead className="bg-background">Status</TableHead>
+              <TableHead className="bg-background">Total Leads</TableHead>
+              <TableHead className="bg-background">Clean Leads</TableHead>
+              <TableHead className="bg-background">Duplicates</TableHead>
+              <TableHead className="bg-background">DNC Matches</TableHead>
+              <TableHead className="bg-background">Total Cost</TableHead>
+              <TableHead className="bg-background">Cost/Lead</TableHead>
+              <TableHead className="bg-background">Upload Date</TableHead>
+              <TableHead className="text-right bg-background">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {uploads.map((upload) => (
+            {currentUploads.map((upload) => (
               <TableRow key={upload.id}>
                 <TableCell className="font-medium">{upload.fileName}</TableCell>
                 <TableCell>{upload.sourceName || "Unknown"}</TableCell>
@@ -186,6 +257,12 @@ export function UploadHistory() {
                 <TableCell>{upload.cleanedLeads}</TableCell>
                 <TableCell>{upload.duplicateLeads}</TableCell>
                 <TableCell>{upload.dncMatches}</TableCell>
+                <TableCell className="text-green-600 font-medium">
+                  ${upload.totalBuyingPrice?.toFixed(2) || '0.00'}
+                </TableCell>
+                <TableCell className="text-green-600 font-medium">
+                  ${upload.buyingPricePerLead?.toFixed(2) || '0.00'}
+                </TableCell>
                 <TableCell>
                   {upload.createdAt ? format(new Date(upload.createdAt), "MMM d, yyyy h:mm a") : "Unknown"}
                 </TableCell>
@@ -198,17 +275,8 @@ export function UploadHistory() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => handleDownload(upload.id)}>
-                        <Download className="mr-2 h-4 w-4" />
-                        Download Results
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleReprocess(upload.id)}>
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                        Reprocess File
-                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => handleViewDetails(upload.id)}>
+                        <Eye className="mr-2 h-4 w-4" />
                         View Details
                       </DropdownMenuItem>
                     </DropdownMenuContent>

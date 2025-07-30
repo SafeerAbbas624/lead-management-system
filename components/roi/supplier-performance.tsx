@@ -4,10 +4,30 @@ import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
-import { roiApi } from "@/lib/mock-api"
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js'
+import { Bar } from 'react-chartjs-2'
 
-export function SupplierPerformance() {
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend
+)
+interface SupplierPerformanceProps {
+  dateRange: { from: Date; to: Date }
+}
+
+export function SupplierPerformance({ dateRange }: SupplierPerformanceProps) {
   const [performance, setPerformance] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
@@ -15,8 +35,11 @@ export function SupplierPerformance() {
     const fetchSupplierPerformance = async () => {
       try {
         setLoading(true)
-        const data = await roiApi.getSupplierPerformance()
-        setPerformance(data)
+        const response = await fetch(`/api/analytics/supplier-performance?from=${dateRange.from.toISOString()}&to=${dateRange.to.toISOString()}`)
+        if (response.ok) {
+          const result = await response.json()
+          setPerformance(result)
+        }
       } catch (error) {
         console.error("Error fetching supplier performance:", error)
       } finally {
@@ -25,7 +48,7 @@ export function SupplierPerformance() {
     }
 
     fetchSupplierPerformance()
-  }, [])
+  }, [dateRange])
 
   if (loading) {
     return (
@@ -35,7 +58,7 @@ export function SupplierPerformance() {
     )
   }
 
-  if (!performance) {
+  if (!performance || (!performance.topSuppliers && !performance.bottomSuppliers)) {
     return (
       <div className="flex items-center justify-center h-96 border rounded-md">
         <p className="text-muted-foreground">No data available</p>
@@ -43,12 +66,72 @@ export function SupplierPerformance() {
     )
   }
 
-  const chartData = [...performance.topSuppliers, ...performance.bottomSuppliers].map((supplier) => ({
-    name: supplier.name,
-    leads: supplier.leads,
-    revenue: supplier.revenue,
-    roi: supplier.roi,
-  }))
+  // Safely handle the data structure
+  const topSuppliers = performance.topSuppliers || []
+  const bottomSuppliers = performance.bottomSuppliers || []
+  const allSuppliers = [...topSuppliers, ...bottomSuppliers]
+
+  const chartData = {
+    labels: allSuppliers.map(supplier => supplier.name?.length > 10 ? supplier.name.substring(0, 10) + '...' : supplier.name || 'Unknown'),
+    datasets: [
+      {
+        label: 'Leads',
+        data: allSuppliers.map(supplier => supplier.leads || 0),
+        backgroundColor: '#8884d8',
+        borderColor: '#6366f1',
+        borderWidth: 1,
+      },
+      {
+        label: 'Revenue ($)',
+        data: allSuppliers.map(supplier => supplier.revenue || 0),
+        backgroundColor: '#82ca9d',
+        borderColor: '#10b981',
+        borderWidth: 1,
+      },
+      {
+        label: 'ROI (%)',
+        data: allSuppliers.map(supplier => supplier.roi || 0),
+        backgroundColor: '#ffc658',
+        borderColor: '#f59e0b',
+        borderWidth: 1,
+      }
+    ]
+  }
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top' as const,
+      },
+      tooltip: {
+        callbacks: {
+          label: function(context: any) {
+            const label = context.dataset.label || '';
+            const value = context.parsed.y;
+            if (label === 'Revenue ($)') {
+              return `${label}: $${value.toLocaleString()}`;
+            } else if (label === 'ROI (%)') {
+              return `${label}: ${value.toFixed(1)}%`;
+            }
+            return `${label}: ${value.toLocaleString()}`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        ticks: {
+          maxRotation: 45,
+          minRotation: 45
+        }
+      },
+      y: {
+        beginAtZero: true
+      }
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -69,14 +152,14 @@ export function SupplierPerformance() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {performance.topSuppliers.map((supplier: any, index: number) => (
+                {topSuppliers.map((supplier: any, index: number) => (
                   <TableRow key={index}>
-                    <TableCell className="font-medium">{supplier.name}</TableCell>
-                    <TableCell>{supplier.leads}</TableCell>
-                    <TableCell>${supplier.revenue.toLocaleString()}</TableCell>
+                    <TableCell className="font-medium">{supplier.name || 'Unknown'}</TableCell>
+                    <TableCell>{(supplier.leads || 0).toLocaleString()}</TableCell>
+                    <TableCell>${(supplier.revenue || 0).toLocaleString()}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="bg-green-100 text-green-800 border-green-200">
-                        {supplier.roi}%
+                        {(supplier.roi || 0).toFixed(1)}%
                       </Badge>
                     </TableCell>
                   </TableRow>
@@ -102,14 +185,14 @@ export function SupplierPerformance() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {performance.bottomSuppliers.map((supplier: any, index: number) => (
+                {bottomSuppliers.map((supplier: any, index: number) => (
                   <TableRow key={index}>
-                    <TableCell className="font-medium">{supplier.name}</TableCell>
-                    <TableCell>{supplier.leads}</TableCell>
-                    <TableCell>${supplier.revenue.toLocaleString()}</TableCell>
+                    <TableCell className="font-medium">{supplier.name || 'Unknown'}</TableCell>
+                    <TableCell>{(supplier.leads || 0).toLocaleString()}</TableCell>
+                    <TableCell>${(supplier.revenue || 0).toLocaleString()}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="bg-red-100 text-red-800 border-red-200">
-                        {supplier.roi}%
+                        {(supplier.roi || 0).toFixed(1)}%
                       </Badge>
                     </TableCell>
                   </TableRow>
@@ -127,26 +210,7 @@ export function SupplierPerformance() {
         </CardHeader>
         <CardContent>
           <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                margin={{
-                  top: 20,
-                  right: 30,
-                  left: 20,
-                  bottom: 60,
-                }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" angle={-45} textAnchor="end" height={70} interval={0} />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="leads" name="Leads" fill="#8884d8" />
-                <Bar dataKey="revenue" name="Revenue ($)" fill="#82ca9d" />
-                <Bar dataKey="roi" name="ROI (%)" fill="#ffc658" />
-              </BarChart>
-            </ResponsiveContainer>
+            <Bar data={chartData} options={chartOptions} />
           </div>
         </CardContent>
       </Card>

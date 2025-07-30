@@ -92,6 +92,8 @@ export async function GET(request: Request) {
     // Execute the query
     const { data: batches, error } = await query;
 
+    console.log('Recent uploads query result:', { batches, error, count: batches?.length });
+
     if (error) {
       console.error('Error fetching recent uploads:', error);
       throw error;
@@ -99,7 +101,15 @@ export async function GET(request: Request) {
 
     // If no batches found, return empty array
     if (!batches || batches.length === 0) {
-      return NextResponse.json({ data: [] });
+      return NextResponse.json({
+        success: true,
+        data: [],
+        pagination: {
+          total: 0,
+          limit,
+          hasMore: false
+        }
+      });
     }
 
     // Format the response
@@ -107,7 +117,7 @@ export async function GET(request: Request) {
       // Initialize supplier data with defaults
       let supplierName = 'N/A';
       let supplierEmail = 'N/A';
-      
+
       // Only try to fetch supplier data if supplierid exists and is a valid number
       const supplierId = batch.supplierid;
       if (supplierId && !isNaN(Number(supplierId))) {
@@ -117,7 +127,7 @@ export async function GET(request: Request) {
             .select('name, email')
             .eq('id', supplierId)
             .maybeSingle();
-            
+
           if (!supplierError && supplierData) {
             supplierName = supplierData.name || 'N/A';
             supplierEmail = supplierData.email || 'N/A';
@@ -128,8 +138,8 @@ export async function GET(request: Request) {
           console.error('Error in supplier fetch:', e);
         }
       }
-      
-      return {
+
+      const transformed = {
         id: batch.id,
         filename: batch.filename,
         status: batch.status,
@@ -143,12 +153,17 @@ export async function GET(request: Request) {
         sourceName: batch.sourcename || 'N/A',
         supplierName,
         supplierEmail,
+        totalBuyingPrice: batch.total_buying_price || 0,
+        buyingPricePerLead: batch.buying_price_per_lead || 0,
         successRate: batch.totalleads ? Math.round(((batch.cleanedleads || 0) / batch.totalleads) * 100) : 0,
         timeAgo: formatTimeAgo(batch.createdat)
       };
+
+      console.log('Transformed batch:', transformed);
+      return transformed;
     }));
 
-    return NextResponse.json({
+    const response = {
       success: true,
       data: formattedBatches,
       pagination: {
@@ -156,7 +171,11 @@ export async function GET(request: Request) {
         limit,
         hasMore: formattedBatches.length === limit
       }
-    });
+    };
+
+    console.log('Final API response:', JSON.stringify(response, null, 2));
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error('Error in recent-uploads endpoint:', error);
     

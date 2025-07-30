@@ -10,6 +10,8 @@ import { AuthProvider } from "@/lib/auth-context"
 import { usePathname } from "next/navigation"
 import { useEffect } from "react"
 import { QueryProvider } from "@/components/providers/query-provider"
+import ErrorBoundary, { useChunkLoadErrorHandler } from "@/components/error-boundary"
+import { ServiceWorkerRegistration } from "@/components/service-worker-registration"
 
 export default function ClientLayout({
   children,
@@ -21,6 +23,9 @@ export default function ClientLayout({
   const isLoginPage = pathname === "/login" || pathname === "/register"
   const showSidebar = !isHomePage && !isLoginPage
 
+  // Handle chunk load errors
+  useChunkLoadErrorHandler()
+
   // Set the document title
   useEffect(() => {
     document.title = "Leads"
@@ -29,20 +34,23 @@ export default function ClientLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen bg-background font-sans antialiased">
-        <QueryProvider>
-          <AuthProvider>
-            <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-              <div className="relative flex min-h-screen flex-col">
-                {!isHomePage && <Header />}
-                <div className="flex flex-1">
-                  {showSidebar && <Sidebar className="hidden md:block" />}
-                  <main className={`flex-1 ${showSidebar ? "p-6" : "p-0"}`}>{children}</main>
+        <ErrorBoundary>
+          <ServiceWorkerRegistration />
+          <QueryProvider>
+            <AuthProvider>
+              <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+                <div className="relative flex min-h-screen flex-col">
+                  {!isHomePage && <Header />}
+                  <div className="flex flex-1">
+                    {showSidebar && <Sidebar className="hidden md:block" />}
+                    <main className={`flex-1 ${showSidebar ? "p-6" : "p-0"}`}>{children}</main>
+                  </div>
                 </div>
-              </div>
-              <Toaster />
-            </ThemeProvider>
-          </AuthProvider>
-        </QueryProvider>
+                <Toaster />
+              </ThemeProvider>
+            </AuthProvider>
+          </QueryProvider>
+        </ErrorBoundary>
       </body>
     </html>
   )

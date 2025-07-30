@@ -1,63 +1,38 @@
-import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server'
 
-export async function POST(req: Request) {
-  const supabase = createServerClient();
-  const body = await req.json();
-  const { batchId, clientIds } = body;
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000'
 
-  if (!batchId || !Array.isArray(clientIds) || clientIds.length === 0) {
-    return NextResponse.json({ error: 'batchId and clientIds are required.' }, { status: 400 });
-  }
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    console.log('Frontend API: Processing distribution request:', body)
 
-  // Fetch leads from the selected batch
-  const { data: leads, error: leadsError } = await supabase
-    .from('leads')
-    .select('*')
-    .eq('uploadbatchid', batchId)
-    .is('clientid', null);
+    const response = await fetch(`${BACKEND_URL}/api/distribution/distribute`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
 
-  if (leadsError) {
-    return NextResponse.json({ error: leadsError.message }, { status: 500 });
-  }
-
-  // Calculate allocations
-  const leadsPerClient = Math.floor(leads.length / clientIds.length);
-  let allocations = [];
-  let leadIndex = 0;
-  for (const clientId of clientIds) {
-    const allocatedLeads = leads.slice(leadIndex, leadIndex + leadsPerClient);
-    allocations.push({ clientId, leads: allocatedLeads.map(l => l.id) });
-    leadIndex += leadsPerClient;
-  }
-  // Distribute any remaining leads
-  let remaining = leads.length - leadIndex;
-  let i = 0;
-  while (remaining > 0) {
-    if (allocations[i]) {
-      allocations[i].leads.push(leads[leadIndex].id);
-      leadIndex++;
-      remaining--;
-      i = (i + 1) % allocations.length;
-    } else {
-      break;
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Backend error:', response.status, errorText)
+      return NextResponse.json(
+        { error: `Backend error: ${response.status} ${errorText}` },
+        { status: response.status }
+      )
     }
-  }
 
-  // Update leads with client assignments
-  let updatedCount = 0;
-  for (const alloc of allocations) {
-    if (alloc.leads.length > 0) {
-      const { error: updateError } = await supabase
-        .from('leads')
-        .update({ clientid: alloc.clientId })
-        .in('id', alloc.leads);
-      if (updateError) {
-        return NextResponse.json({ error: updateError.message }, { status: 500 });
-      }
-      updatedCount += alloc.leads.length;
-    }
-  }
+    const result = await response.json()
+    console.log('Backend response:', result)
 
-  return NextResponse.json({ totalLeads: updatedCount, distributions: allocations });
+    return NextResponse.json(result)
+  } catch (error) {
+    console.error('Error processing distribution:', error)
+    return NextResponse.json(
+      { error: 'Failed to process distribution' },
+      { status: 500 }
+    )
+  }
 }

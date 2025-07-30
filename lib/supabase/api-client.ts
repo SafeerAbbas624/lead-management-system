@@ -39,27 +39,26 @@ export const supplierApi = {
     lead_cost?: number;
     status?: string;
   }) {
-    const api_key = `sup_${crypto.randomUUID().replace(/-/g, '')}`;
-    
+    const apikey = `sup_${crypto.randomUUID().replace(/-/g, '')}`;
+
     const { data, error } = await supabase
       .from('suppliers')
       .insert([
-        { 
+        {
           name: supplierData.name,
           email: supplierData.email,
           contact_person: supplierData.contact_person,
           lead_cost: supplierData.lead_cost,
-          api_key: api_key,
+          apikey: apikey,
           status: supplierData.status || 'Active',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          created_at: new Date().toISOString()
         }
       ])
       .select()
       .single();
-    
+
     if (error) handleError(error);
-    return { ...data, api_key };
+    return data;
   },
 
   // Get a single supplier by ID
@@ -81,20 +80,15 @@ export const supplierApi = {
     contact_person: string | null;
     lead_cost: number | null;
     status: string;
-    api_key?: string;
+    apikey?: string;
   }>) {
-    const updateObj = {
-      ...updateData,
-      updated_at: new Date().toISOString()
-    };
-    
     const { data, error } = await supabase
       .from('suppliers')
-      .update(updateObj)
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
-    
+
     if (error) handleError(error);
     return data;
   },

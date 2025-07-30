@@ -1,29 +1,36 @@
-import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server'
 
-export async function GET() {
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000'
+
+export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerClient();
-    const { data, error } = await supabase
-      .from('clients')
-      .select('*')
-      .order('name', { ascending: true });
-      
-    if (error) {
-      console.error('Supabase error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    console.log('Frontend API: Fetching available clients for distribution')
+
+    const response = await fetch(`${BACKEND_URL}/api/distribution/clients`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Backend error:', response.status, errorText)
+      return NextResponse.json(
+        { error: `Backend error: ${response.status} ${errorText}` },
+        { status: response.status }
+      )
     }
-    
-    if (!data) {
-      return NextResponse.json([], { status: 200 });
-    }
-    
-    return NextResponse.json(data);
+
+    const result = await response.json()
+    console.log('Backend response:', result)
+
+    return NextResponse.json(result)
   } catch (error) {
-    console.error('Unexpected error:', error);
+    console.error('Error fetching clients:', error)
     return NextResponse.json(
-      { error: 'An unexpected error occurred' },
+      { error: 'Failed to fetch clients' },
       { status: 500 }
-    );
+    )
   }
 }

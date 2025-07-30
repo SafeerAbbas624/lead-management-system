@@ -1,355 +1,417 @@
 "use client"
 
-import { useState } from "react"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import type React from "react"
+
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Separator } from "@/components/ui/separator"
-import { toast } from "@/hooks/use-toast"
-import { Loader2, Save } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
+import { 
+  Save, 
+  User, 
+  Lock, 
+  Mail,
+  AlertTriangle,
+  CheckCircle,
+  Eye,
+  EyeOff,
+  Calendar
+} from "lucide-react"
+import { useAuth } from "@/lib/auth-context"
+import { useToast } from "@/hooks/use-toast"
 
-export default function SettingsPage() {
-  const [isLoading, setIsLoading] = useState(false)
-  const [settings, setSettings] = useState({
-    // Display Settings
-    theme: "system",
-    compactMode: false,
-    showTips: true,
+interface UserProfile {
+  id: number
+  username: string
+  fullName: string
+  email: string
+  role: string
+  createdAt: string
+}
 
-    // Notification Settings
-    emailNotifications: true,
-    pushNotifications: false,
-    notificationSounds: true,
-
-    // Data Settings
-    autoSave: true,
-    dataRetention: "90days",
-    downloadFormat: "csv",
-
-    // Privacy Settings
-    shareUsageData: false,
-    storeSearchHistory: true,
+export default function UserSettingsPage() {
+  const { user, refreshUser } = useAuth()
+  const { toast } = useToast()
+  const [loading, setLoading] = useState(false)
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  
+  const [profileData, setProfileData] = useState({
+    fullName: "",
+    email: "",
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: ""
   })
 
-  const handleSwitchChange = (field: string) => {
-    setSettings({
-      ...settings,
-      [field]: !settings[field as keyof typeof settings],
-    })
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+
+  useEffect(() => {
+    if (user) {
+      setProfileData(prev => ({
+        ...prev,
+        fullName: user.fullName || "",
+        email: user.email || ""
+      }))
+      setUserProfile(user)
+    }
+  }, [user])
+
+  const handleInputChange = (field: string, value: string) => {
+    setProfileData(prev => ({
+      ...prev,
+      [field]: value
+    }))
   }
 
-  const handleSelectChange = (field: string, value: string) => {
-    setSettings({
-      ...settings,
-      [field]: value,
-    })
-  }
-
-  const handleSaveSettings = async () => {
-    setIsLoading(true)
-    try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      // In a real app, you would save the settings to your backend here
-
+  const handleProfileUpdate = async () => {
+    if (!profileData.fullName.trim() || !profileData.email.trim()) {
       toast({
-        title: "Settings saved",
-        description: "Your preferences have been updated successfully.",
+        title: "Validation Error",
+        description: "Full name and email are required.",
+        variant: "destructive"
       })
-    } catch (error) {
-      console.error("Error saving settings:", error)
+      return
+    }
+
+    if (profileData.newPassword && profileData.newPassword !== profileData.confirmPassword) {
       toast({
-        title: "Save failed",
-        description: "There was an error saving your settings. Please try again.",
-        variant: "destructive",
+        title: "Password Mismatch",
+        description: "New password and confirm password do not match.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    if (profileData.newPassword && profileData.newPassword.length < 6) {
+      toast({
+        title: "Password Too Short",
+        description: "Password must be at least 6 characters long.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    setLoading(true)
+    try {
+      const updateData: any = {
+        fullName: profileData.fullName,
+        email: profileData.email
+      }
+
+      if (profileData.newPassword) {
+        updateData.currentPassword = profileData.currentPassword
+        updateData.newPassword = profileData.newPassword
+      }
+
+      const response = await fetch('/api/user/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateData)
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        toast({
+          title: "Profile Updated",
+          description: "Your profile has been updated successfully.",
+          variant: "default"
+        })
+
+        // Clear password fields
+        setProfileData(prev => ({
+          ...prev,
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: ""
+        }))
+
+        // Refresh user data
+        if (refreshUser) {
+          await refreshUser()
+        }
+      } else {
+        toast({
+          title: "Update Failed",
+          description: result.error || "Failed to update profile.",
+          variant: "destructive"
+        })
+      }
+    } catch (error) {
+      console.error('Error updating profile:', error)
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred.",
+        variant: "destructive"
       })
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
   }
 
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2)
+  }
+
+  const getRoleBadgeColor = (role: string) => {
+    switch (role) {
+      case 'Admin': return 'bg-red-100 text-red-800'
+      case 'Manager': return 'bg-blue-100 text-blue-800'
+      case 'Viewer': return 'bg-green-100 text-green-800'
+      default: return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <AlertTriangle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <h2 className="text-xl font-semibold mb-2">Authentication Required</h2>
+          <p className="text-muted-foreground">Please log in to access your profile settings.</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="container py-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">Manage your application preferences and settings</p>
+    <div className="container mx-auto py-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold">Profile Settings</h1>
+          <p className="text-muted-foreground">Manage your account information and preferences</p>
+        </div>
       </div>
 
-      <Tabs defaultValue="display" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="display">Display</TabsTrigger>
-          <TabsTrigger value="notifications">Notifications</TabsTrigger>
-          <TabsTrigger value="data">Data</TabsTrigger>
-          <TabsTrigger value="privacy">Privacy</TabsTrigger>
+      <Tabs defaultValue="profile" className="space-y-4">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="profile">Profile Information</TabsTrigger>
+          <TabsTrigger value="security">Security & Password</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="display" className="space-y-4">
+        <TabsContent value="profile" className="space-y-4">
+          {/* User Profile Overview */}
           <Card>
             <CardHeader>
-              <CardTitle>Display Settings</CardTitle>
-              <CardDescription>Customize how the application looks and feels</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <User className="h-5 w-5" />
+                Profile Overview
+              </CardTitle>
+              <CardDescription>Your account information and role</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="theme">Theme</Label>
-                  <Select value={settings.theme} onValueChange={(value) => handleSelectChange("theme", value)}>
-                    <SelectTrigger id="theme">
-                      <SelectValue placeholder="Select theme" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="light">Light</SelectItem>
-                      <SelectItem value="dark">Dark</SelectItem>
-                      <SelectItem value="system">System</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-sm text-muted-foreground">Choose between light, dark, or system theme.</p>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="compactMode">Compact Mode</Label>
-                    <p className="text-sm text-muted-foreground">Reduce spacing and padding throughout the interface</p>
+            <CardContent>
+              <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
+                <Avatar className="h-16 w-16">
+                  <AvatarImage src="" alt={userProfile?.fullName || ""} />
+                  <AvatarFallback className="text-lg">
+                    {getInitials(userProfile?.fullName || "User")}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold">{userProfile?.fullName || "Unknown User"}</h3>
+                  <p className="text-sm text-muted-foreground">@{userProfile?.username}</p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Badge className={getRoleBadgeColor(userProfile?.role || "")}>
+                      {userProfile?.role}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      Member since {userProfile?.createdAt ? new Date(userProfile.createdAt).toLocaleDateString() : "Unknown"}
+                    </span>
                   </div>
-                  <Switch
-                    id="compactMode"
-                    checked={settings.compactMode}
-                    onCheckedChange={() => handleSwitchChange("compactMode")}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Profile Information Form */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Personal Information</CardTitle>
+              <CardDescription>Update your personal details</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="fullName">Full Name</Label>
+                  <Input
+                    id="fullName"
+                    value={profileData.fullName}
+                    onChange={(e) => handleInputChange("fullName", e.target.value)}
+                    placeholder="Enter your full name"
                   />
                 </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="showTips">Show Tips</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Display helpful tips and suggestions while using the app
-                    </p>
-                  </div>
-                  <Switch
-                    id="showTips"
-                    checked={settings.showTips}
-                    onCheckedChange={() => handleSwitchChange("showTips")}
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email Address</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={profileData.email}
+                    onChange={(e) => handleInputChange("email", e.target.value)}
+                    placeholder="Enter your email"
                   />
                 </div>
               </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Username</Label>
+                  <Input
+                    value={userProfile?.username || ""}
+                    disabled
+                    className="bg-muted"
+                  />
+                  <p className="text-xs text-muted-foreground">Username cannot be changed</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Role</Label>
+                  <Input
+                    value={userProfile?.role || ""}
+                    disabled
+                    className="bg-muted"
+                  />
+                  <p className="text-xs text-muted-foreground">Role is managed by administrators</p>
+                </div>
+              </div>
             </CardContent>
-            <CardFooter>
-              <Button onClick={handleSaveSettings} disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save Changes
-                  </>
-                )}
-              </Button>
-            </CardFooter>
           </Card>
         </TabsContent>
 
-        <TabsContent value="notifications" className="space-y-4">
+        <TabsContent value="security" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Notification Settings</CardTitle>
-              <CardDescription>Configure how and when you receive notifications</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <Lock className="h-5 w-5" />
+                Change Password
+              </CardTitle>
+              <CardDescription>Update your account password for security</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="emailNotifications">Email Notifications</Label>
-                  <p className="text-sm text-muted-foreground">Receive notifications via email</p>
+            <CardContent className="space-y-4">
+              <Alert>
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  Leave password fields empty if you don't want to change your password.
+                </AlertDescription>
+              </Alert>
+
+              <div className="space-y-2">
+                <Label htmlFor="currentPassword">Current Password</Label>
+                <div className="relative">
+                  <Input
+                    id="currentPassword"
+                    type={showCurrentPassword ? "text" : "password"}
+                    value={profileData.currentPassword}
+                    onChange={(e) => handleInputChange("currentPassword", e.target.value)}
+                    placeholder="Enter your current password"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                  >
+                    {showCurrentPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
                 </div>
-                <Switch
-                  id="emailNotifications"
-                  checked={settings.emailNotifications}
-                  onCheckedChange={() => handleSwitchChange("emailNotifications")}
-                />
               </div>
 
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="pushNotifications">Push Notifications</Label>
-                  <p className="text-sm text-muted-foreground">Receive push notifications in your browser</p>
+              <div className="space-y-2">
+                <Label htmlFor="newPassword">New Password</Label>
+                <div className="relative">
+                  <Input
+                    id="newPassword"
+                    type={showNewPassword ? "text" : "password"}
+                    value={profileData.newPassword}
+                    onChange={(e) => handleInputChange("newPassword", e.target.value)}
+                    placeholder="Enter your new password"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                  >
+                    {showNewPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
                 </div>
-                <Switch
-                  id="pushNotifications"
-                  checked={settings.pushNotifications}
-                  onCheckedChange={() => handleSwitchChange("pushNotifications")}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="notificationSounds">Notification Sounds</Label>
-                  <p className="text-sm text-muted-foreground">Play sounds for important notifications</p>
-                </div>
-                <Switch
-                  id="notificationSounds"
-                  checked={settings.notificationSounds}
-                  onCheckedChange={() => handleSwitchChange("notificationSounds")}
-                />
-              </div>
-            </CardContent>
-            <CardFooter>
-              <Button onClick={handleSaveSettings} disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save Changes
-                  </>
-                )}
-              </Button>
-            </CardFooter>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="data" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Data Settings</CardTitle>
-              <CardDescription>Manage how your data is handled and stored</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="autoSave">Auto-Save</Label>
-                  <p className="text-sm text-muted-foreground">Automatically save changes as you work</p>
-                </div>
-                <Switch
-                  id="autoSave"
-                  checked={settings.autoSave}
-                  onCheckedChange={() => handleSwitchChange("autoSave")}
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="dataRetention">Data Retention</Label>
-                <Select
-                  value={settings.dataRetention}
-                  onValueChange={(value) => handleSelectChange("dataRetention", value)}
-                >
-                  <SelectTrigger id="dataRetention">
-                    <SelectValue placeholder="Select retention period" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="30days">30 Days</SelectItem>
-                    <SelectItem value="90days">90 Days</SelectItem>
-                    <SelectItem value="1year">1 Year</SelectItem>
-                    <SelectItem value="forever">Forever</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-sm text-muted-foreground">How long to keep your data before automatic deletion</p>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="downloadFormat">Download Format</Label>
-                <Select
-                  value={settings.downloadFormat}
-                  onValueChange={(value) => handleSelectChange("downloadFormat", value)}
-                >
-                  <SelectTrigger id="downloadFormat">
-                    <SelectValue placeholder="Select download format" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="csv">CSV</SelectItem>
-                    <SelectItem value="xlsx">Excel (XLSX)</SelectItem>
-                    <SelectItem value="json">JSON</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-sm text-muted-foreground">Default format for downloading data</p>
-              </div>
-            </CardContent>
-            <CardFooter>
-              <Button onClick={handleSaveSettings} disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save Changes
-                  </>
-                )}
-              </Button>
-            </CardFooter>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="privacy" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Privacy Settings</CardTitle>
-              <CardDescription>Control your privacy and data sharing preferences</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="shareUsageData">Share Usage Data</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Share anonymous usage data to help improve the application
-                  </p>
-                </div>
-                <Switch
-                  id="shareUsageData"
-                  checked={settings.shareUsageData}
-                  onCheckedChange={() => handleSwitchChange("shareUsageData")}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="storeSearchHistory">Store Search History</Label>
-                  <p className="text-sm text-muted-foreground">Save your search history for quick access</p>
-                </div>
-                <Switch
-                  id="storeSearchHistory"
-                  checked={settings.storeSearchHistory}
-                  onCheckedChange={() => handleSwitchChange("storeSearchHistory")}
-                />
-              </div>
-
-              <div className="pt-4">
-                <Button variant="destructive">Delete All My Data</Button>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  This will permanently delete all your personal data and cannot be undone.
+                <p className="text-xs text-muted-foreground">
+                  Password must be at least 6 characters long
                 </p>
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                <div className="relative">
+                  <Input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={profileData.confirmPassword}
+                    onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
+                    placeholder="Confirm your new password"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
             </CardContent>
-            <CardFooter>
-              <Button onClick={handleSaveSettings} disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save Changes
-                  </>
-                )}
-              </Button>
-            </CardFooter>
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Save Button */}
+      <div className="flex justify-end">
+        <Button
+          onClick={handleProfileUpdate}
+          disabled={loading}
+          className="min-w-[120px]"
+        >
+          {loading ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="mr-2 h-4 w-4" />
+              Save Changes
+            </>
+          )}
+        </Button>
+      </div>
     </div>
   )
 }

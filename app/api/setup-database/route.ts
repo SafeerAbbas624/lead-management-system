@@ -2,9 +2,8 @@ import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
 // Initialize Supabase client with service role key for admin operations
-const supabaseUrl = "https://pyoeipqdkejhofhvwanq.supabase.co"
-const supabaseServiceKey =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5b2VpcHFka2VqaG9maHZ3YW5xIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0Nzk1MDg2NSwiZXhwIjoyMDYzNTI2ODY1fQ.0_1s-etQtAusM0RVMq5ZvinTPSlfidk62UoSfVUnwSo"
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 export async function POST() {
@@ -16,65 +15,75 @@ export async function POST() {
 
     -- Users table
     CREATE TABLE IF NOT EXISTS users (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      id SERIAL PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
+      password TEXT NOT NULL,
       fullName TEXT,
-      email TEXT NOT NULL UNIQUE,
-      role TEXT NOT NULL DEFAULT 'viewer',
-      createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      updatedAt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      email TEXT,
+      role TEXT NOT NULL,
+      createdAt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     );
 
     -- Suppliers table
     CREATE TABLE IF NOT EXISTS suppliers (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
-      email TEXT,
-      contactPerson TEXT,
-      apiKey TEXT,
-      status TEXT NOT NULL DEFAULT 'Active',
-      leadCost DECIMAL(10, 2),
-      createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      updatedAt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      email TEXT NOT NULL,
+      contactperson TEXT,
+      apikey TEXT,
+      status TEXT CHECK (status = ANY (ARRAY['Active'::text, 'Inactive'::text])),
+      leadcost NUMERIC,
+      createdat TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     );
 
     -- Upload batches table
     CREATE TABLE IF NOT EXISTS upload_batches (
       id SERIAL PRIMARY KEY,
-      fileName TEXT NOT NULL,
-      fileType TEXT,
-      status TEXT NOT NULL DEFAULT 'Uploaded',
-      totalLeads INTEGER DEFAULT 0,
-      cleanedLeads INTEGER DEFAULT 0,
-      duplicateLeads INTEGER DEFAULT 0,
-      dncMatches INTEGER DEFAULT 0,
-      processingProgress INTEGER DEFAULT 0,
-      supplierId INTEGER REFERENCES suppliers(id),
-      sourceName TEXT,
-      errorMessage TEXT,
-      createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      completedAt TIMESTAMP WITH TIME ZONE
+      filename TEXT NOT NULL,
+      filetype TEXT NOT NULL,
+      status TEXT NOT NULL,
+      totalleads INTEGER,
+      cleanedleads INTEGER,
+      duplicateleads INTEGER,
+      dncmatches INTEGER,
+      errormessage TEXT,
+      originalheaders TEXT[],
+      mappingrules JSONB,
+      uploadedby INTEGER,
+      processingprogress INTEGER,
+      supplierid INTEGER,
+      sourcename TEXT,
+      createdat TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      completedat TIMESTAMP WITH TIME ZONE
     );
 
     -- Leads table
     CREATE TABLE IF NOT EXISTS leads (
       id SERIAL PRIMARY KEY,
-      firstName TEXT,
-      lastName TEXT,
       email TEXT,
+      firstname TEXT,
+      lastname TEXT,
       phone TEXT,
-      companyName TEXT,
+      companyname TEXT,
+      taxid TEXT,
       address TEXT,
       city TEXT,
       state TEXT,
-      zipCode TEXT,
+      zipcode TEXT,
       country TEXT,
-      leadStatus TEXT DEFAULT 'New',
-      leadSource TEXT,
-      uploadBatchId INTEGER REFERENCES upload_batches(id),
-      exclusivity BOOLEAN DEFAULT FALSE,
-      createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      updatedAt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      leadsource TEXT,
+      leadstatus TEXT,
+      leadscore INTEGER,
+      leadcost NUMERIC,
+      exclusivity BOOLEAN,
+      exclusivitynotes TEXT,
+      uploadbatchid INTEGER,
+      clientid INTEGER,
+      supplierid INTEGER,
+      metadata JSONB,
+      tags TEXT[],
+      createdat TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updatedat TIMESTAMP WITH TIME ZONE
     );
 
     -- DNC Lists table
@@ -83,37 +92,66 @@ export async function POST() {
       name TEXT NOT NULL,
       type TEXT NOT NULL,
       description TEXT,
-      isActive BOOLEAN DEFAULT TRUE,
-      createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      lastUpdated TIMESTAMP WITH TIME ZONE
+      isactive BOOLEAN,
+      createdat TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      lastupdated TIMESTAMP WITH TIME ZONE
     );
 
     -- DNC Entries table
     CREATE TABLE IF NOT EXISTS dnc_entries (
       id SERIAL PRIMARY KEY,
       value TEXT NOT NULL,
-      valueType TEXT NOT NULL,
+      valuetype TEXT NOT NULL,
       source TEXT,
       reason TEXT,
-      dncListId INTEGER REFERENCES dnc_lists(id),
-      createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      expiryDate TIMESTAMP WITH TIME ZONE
+      dnclistid INTEGER NOT NULL,
+      createdat TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      expirydate TIMESTAMP WITH TIME ZONE
     );
 
     -- Clients table
     CREATE TABLE IF NOT EXISTS clients (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
-      email TEXT,
+      email TEXT NOT NULL,
       phone TEXT,
-      contactPerson TEXT,
-      deliveryFormat TEXT DEFAULT 'CSV',
-      deliverySchedule TEXT DEFAULT 'Daily',
-      percentAllocation INTEGER,
-      fixedAllocation INTEGER,
-      isActive BOOLEAN DEFAULT TRUE,
-      createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      updatedAt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      contactperson TEXT,
+      deliveryformat TEXT,
+      deliveryschedule TEXT,
+      percentallocation INTEGER,
+      fixedallocation INTEGER,
+      exclusivitysettings JSONB,
+      isactive BOOLEAN,
+      createdat TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+
+    -- Lead distributions table
+    CREATE TABLE IF NOT EXISTS lead_distributions (
+      id SERIAL PRIMARY KEY,
+      batchid INTEGER,
+      clientid INTEGER,
+      leadsallocated INTEGER NOT NULL,
+      deliverystatus TEXT DEFAULT 'Pending'::text,
+      deliverydate TIMESTAMP WITH TIME ZONE,
+      createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      CONSTRAINT lead_distributions_batchid_fkey FOREIGN KEY (batchid) REFERENCES upload_batches(id),
+      CONSTRAINT lead_distributions_clientid_fkey FOREIGN KEY (clientid) REFERENCES clients(id)
+    );
+
+    -- Reports table
+    CREATE TABLE IF NOT EXISTS reports (
+      id UUID NOT NULL DEFAULT uuid_generate_v4(),
+      user_id UUID NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      format TEXT NOT NULL,
+      date_from TIMESTAMP WITH TIME ZONE NOT NULL,
+      date_to TIMESTAMP WITH TIME ZONE NOT NULL,
+      file_name TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'::text,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      CONSTRAINT reports_pkey PRIMARY KEY (id)
     );
 
     -- Lead Distributions table

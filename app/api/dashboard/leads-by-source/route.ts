@@ -7,20 +7,28 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 export async function GET() {
   try {
-    // Get leads count by source
-    const { data, error } = await supabase
+    // Get all leads and count by source
+    const { data: leads, error } = await supabase
       .from('leads')
-      .select('leadSource, count')
-      .not('leadSource', 'is', null)
-      .order('count', { ascending: false });
+      .select('leadsource, supplierid, suppliers(name)')
+      .not('leadsource', 'is', null);
 
     if (error) throw error;
 
+    // Count leads by source
+    const sourceCounts: { [key: string]: number } = {};
+
+    leads?.forEach(lead => {
+      // Use supplier name if available, otherwise use leadsource
+      const source = lead.suppliers?.name || lead.leadsource || 'Unknown';
+      sourceCounts[source] = (sourceCounts[source] || 0) + 1;
+    });
+
     // Format the data for the chart
-    const formattedData = data.map(item => ({
-      source: item.leadSource,
-      count: item.count,
-    }));
+    const formattedData = Object.entries(sourceCounts).map(([source, count]) => ({
+      name: source,
+      value: count,
+    })).sort((a, b) => b.value - a.value); // Sort by count descending
 
     return NextResponse.json({
       success: true,
@@ -29,8 +37,8 @@ export async function GET() {
   } catch (error) {
     console.error('Error fetching leads by source:', error);
     return NextResponse.json(
-      { 
-        success: false, 
+      {
+        success: false,
         error: 'Failed to fetch leads by source',
         details: error instanceof Error ? error.message : 'Unknown error'
       },
