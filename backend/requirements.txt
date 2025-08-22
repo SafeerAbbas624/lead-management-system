@@ -27,6 +27,9 @@ email-validator==2.1.0.post1
 aiofiles==23.2.1
 python-magic==0.4.27
 
+# Email Services
+sendgrid==6.11.0
+
 # Development
 pytest==8.0.0
 pytest-asyncio==0.23.5

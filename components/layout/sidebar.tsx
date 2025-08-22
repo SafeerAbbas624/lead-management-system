@@ -17,6 +17,7 @@ import {
   Share2,
   Building2,
   Upload,
+  Mail,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useRoleAccess } from "@/hooks/use-role-access"
@@ -77,6 +78,9 @@ export function Sidebar({ className }: SidebarProps) {
             )}
             {hasPermission('canViewActivityLogs') && (
               <NavItem href="/admin/activity" icon={<Activity />} label="Activity Logs" pathname={pathname} />
+            )}
+            {hasPermission('canAccessSystemSettings') && (
+              <NavItem href="/admin/test-sendgrid" icon={<Mail />} label="Test SendGrid" pathname={pathname} />
             )}
             {hasPermission('canAccessSystemSettings') && (
               <NavItem href="/settings" icon={<Settings />} label="Profile Settings" pathname={pathname} />

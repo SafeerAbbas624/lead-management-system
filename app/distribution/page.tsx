@@ -8,11 +8,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Separator } from "@/components/ui/separator"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Trash2, Download, Users, FileSpreadsheet, DollarSign, Shuffle, AlertCircle } from "lucide-react"
+import { Plus, Trash2, Download, Users, FileSpreadsheet, DollarSign, Shuffle, AlertCircle, Mail } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { format } from "date-fns"
 
@@ -70,8 +70,9 @@ export default function DistributionPage() {
   const [sellingPricePerSheet, setSellingPricePerSheet] = useState<number>(0)
   const [blendEnabled, setBlendEnabled] = useState<boolean>(false)
   const [distributionName, setDistributionName] = useState<string>("")
+  const [sourceName, setSourceName] = useState<string>("")
   const [distributionHistory, setDistributionHistory] = useState<DistributionHistory[]>([])
-  
+
   // Loading states
   const [loading, setLoading] = useState(true)
   const [distributing, setDistributing] = useState(false)
@@ -216,12 +217,13 @@ export default function DistributionPage() {
       }
 
       setDistributing(true)
+      setError(null) // Clear any previous errors
 
       const distributionRequest = {
         batches: selectedBatches.map(b => ({
           batch_id: b.batch_id,
           percentage: b.percentage,
-          source_name: b.source_name
+          source_name: sourceName || b.source_name || 'Unknown Source'
         })),
         client_ids: selectedClients,
         selling_price_per_sheet: sellingPricePerSheet,
@@ -238,7 +240,50 @@ export default function DistributionPage() {
       })
 
       if (!response.ok) {
-        throw new Error('Distribution failed')
+        let errorMessage = `Distribution failed: ${response.status} ${response.statusText}`
+
+        try {
+          const errorData = await response.text()
+          console.error('Distribution error details:', errorData)
+
+          // Try to parse the error message from the backend
+          const errorJson = JSON.parse(errorData)
+
+          // Handle different error response formats
+          if (errorJson.detail) {
+            // Direct FastAPI error
+            errorMessage = errorJson.detail
+          } else if (errorJson.error) {
+            // Nested error from Next.js API
+            if (errorJson.error.includes('Backend error:')) {
+              try {
+                // Extract the JSON part after "Backend error: XXX "
+                const backendErrorMatch = errorJson.error.match(/Backend error: \d+ (.+)/)
+                if (backendErrorMatch && backendErrorMatch[1]) {
+                  const backendErrorStr = backendErrorMatch[1]
+                  const backendError = JSON.parse(backendErrorStr)
+                  if (backendError.detail) {
+                    errorMessage = backendError.detail
+                  } else {
+                    errorMessage = backendErrorStr
+                  }
+                } else {
+                  errorMessage = errorJson.error
+                }
+              } catch (e) {
+                console.error('Error parsing backend error:', e)
+                errorMessage = errorJson.error
+              }
+            } else {
+              errorMessage = errorJson.error
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing error response:', e)
+          // If parsing fails, use the default message
+        }
+
+        throw new Error(errorMessage)
       }
 
       const result = await response.json()
@@ -249,18 +294,54 @@ export default function DistributionPage() {
           description: `Successfully distributed ${result.total_leads_distributed} leads`,
         })
 
-        // Download CSV
-        const csvResponse = await fetch(`/api/distribution/export/${result.distribution_id}`)
-        if (csvResponse.ok) {
-          const blob = await csvResponse.blob()
-          const url = window.URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = result.csv_filename
-          document.body.appendChild(a)
-          a.click()
-          a.remove()
-          window.URL.revokeObjectURL(url)
+        // Send emails to selected clients
+        const clientEmails = clients
+          .filter(client => selectedClients.includes(client.id))
+          .map(client => client.email)
+
+        if (clientEmails.length > 0) {
+          try {
+            const emailResponse = await fetch('/api/distribution/send-email', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                distribution_id: result.distribution_id,
+                client_emails: clientEmails,
+                distribution_name: distributionName || `Distribution ${new Date().toISOString().split('T')[0]}`
+              }),
+            })
+
+            if (emailResponse.ok) {
+              const emailResult = await emailResponse.json()
+              if (emailResult.success) {
+                toast({
+                  title: "Emails Sent",
+                  description: emailResult.message,
+                })
+              } else {
+                toast({
+                  title: "Email Error",
+                  description: emailResult.error || "Failed to send emails",
+                  variant: "destructive",
+                })
+              }
+            } else {
+              toast({
+                title: "Email Error",
+                description: "Failed to send emails to clients",
+                variant: "destructive",
+              })
+            }
+          } catch (emailError) {
+            console.error('Email sending error:', emailError)
+            toast({
+              title: "Email Error",
+              description: "Failed to send emails to clients",
+              variant: "destructive",
+            })
+          }
         }
 
         // Reset form
@@ -269,6 +350,7 @@ export default function DistributionPage() {
         setSellingPricePerSheet(0)
         setBlendEnabled(false)
         setDistributionName("")
+        setSourceName("")
 
         // Refresh history
         fetchInitialData()
@@ -278,11 +360,21 @@ export default function DistributionPage() {
 
     } catch (error) {
       console.error('Distribution error:', error)
+
+      // Extract meaningful error message
+      let displayMessage = 'Distribution failed'
+      if (error instanceof Error) {
+        displayMessage = error.message
+      }
+
       toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : 'Distribution failed',
+        title: "Distribution Error",
+        description: displayMessage,
         variant: "destructive",
       })
+
+      // Also set error state for display in UI
+      setError(displayMessage)
     } finally {
       setDistributing(false)
     }
@@ -318,6 +410,14 @@ export default function DistributionPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Lead Distribution</h1>
       </div>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       <Tabs defaultValue="distribute" className="space-y-4">
         <TabsList>
@@ -473,7 +573,7 @@ export default function DistributionPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="distributionName">Distribution Name (Optional)</Label>
                   <Input
@@ -481,6 +581,16 @@ export default function DistributionPage() {
                     value={distributionName}
                     onChange={(e) => setDistributionName(e.target.value)}
                     placeholder="e.g., Q1 2024 Distribution"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="sourceName">Source Name (Optional)</Label>
+                  <Input
+                    id="sourceName"
+                    value={sourceName}
+                    onChange={(e) => setSourceName(e.target.value)}
+                    placeholder="e.g., Premium Leads Source"
                   />
                 </div>
 
@@ -536,9 +646,9 @@ export default function DistributionPage() {
             </CardContent>
           </Card>
 
-          {/* Export Button */}
+          {/* Distribution & Email Button */}
           <Card>
-            <CardContent className="pt-6">
+            <CardContent className="pt-6 space-y-3">
               <Button
                 onClick={handleDistribution}
                 disabled={distributing || selectedBatches.length === 0 || selectedClients.length === 0 || sellingPricePerSheet <= 0}
@@ -552,11 +662,15 @@ export default function DistributionPage() {
                   </>
                 ) : (
                   <>
-                    <Download className="h-4 w-4 mr-2" />
-                    Export & Download CSV
+                    <Mail className="h-4 w-4 mr-2" />
+                    Distribute & Email to Clients
                   </>
                 )}
               </Button>
+
+              <div className="text-center text-sm text-muted-foreground">
+                Lead files will be automatically emailed to selected clients
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

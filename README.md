@@ -16,7 +16,8 @@ A comprehensive lead management system built with Next.js, FastAPI, and Supabase
 - **Multi-Batch Selection**: Choose multiple upload batches with percentage allocation
 - **Client History Tracking**: Prevents duplicate distributions with complete audit trails
 - **Lead Blending**: Optional mixing of leads from different sources
-- **Instant CSV Export**: Standardized 12-column CSV download with custom naming
+- **Automated Email Delivery**: SendGrid integration automatically emails CSV files to clients ⭐ **NEW**
+- **Professional Email Templates**: Branded emails with distribution details and CSV attachments
 - **Real-Time Analytics**: Complete distribution history and cost tracking
 
 ### **👥 Client & Supplier Management**
@@ -664,14 +665,17 @@ Our comprehensive lead distribution system provides intelligent batch selection,
 - **Conflict Resolution**: Filters out leads previously distributed to selected clients
 - **Distribution Naming**: Custom names for tracking and organization
 
-#### **📤 Automated Export & Download**
-- **Instant CSV Generation**: Automatic CSV creation upon distribution completion
-- **Standardized Columns**: Exports with specific columns as requested:
+#### **📤 Automated Email Delivery** ⭐ **NEW**
+- **SendGrid Integration**: Professional email delivery service integration
+- **Automatic Email Sending**: CSV files automatically emailed to selected clients
+- **Professional Templates**: Branded email templates with distribution details
+- **Multiple Recipients**: Send to multiple clients simultaneously
+- **Standardized CSV Format**: Exports with specific columns as requested:
   ```
   s.no, firstname, lastname, email, phone, companyname,
   taxid, address, city, state, zipcode, country
   ```
-- **Automatic Download**: Browser automatically downloads the generated CSV file
+- **Delivery Tracking**: Complete email delivery status and error handling
 - **Filename Convention**: `lead_distribution_{id}_{timestamp}.csv`
 
 #### **📊 Distribution History & Analytics**
@@ -869,6 +873,10 @@ Our comprehensive Profile Settings system provides secure, user-friendly account
 
    # API Token
    API_TOKEN="your-api-token"
+
+   # SendGrid Email Configuration (for automated client email delivery)
+   SENDGRID_API_KEY="your-sendgrid-api-key"
+   SENDGRID_FROM_EMAIL="support@insaneagent.ai"
    ```
 
 5. **Database Setup**
@@ -894,7 +902,18 @@ Our comprehensive Profile Settings system provides secure, user-friendly account
    npm install bcryptjs jsonwebtoken @types/bcryptjs @types/jsonwebtoken
    ```
 
-7. **Create Default Admin User**
+7. **Install SendGrid Email Integration** ⭐ **NEW**
+   ```bash
+   # Frontend
+   npm install @sendgrid/mail@^8.1.3
+
+   # Backend
+   cd backend
+   pip install sendgrid==6.11.0
+   cd ..
+   ```
+
+8. **Create Default Admin User**
    ```bash
    # Start the development server first
    npm run dev
@@ -903,7 +922,7 @@ Our comprehensive Profile Settings system provides secure, user-friendly account
    curl -X POST http://localhost:3000/api/create-admin-simple
    ```
 
-8. **Start Development Servers**
+9. **Start Development Servers**
    ```bash
    # Frontend (Next.js)
    npm run dev

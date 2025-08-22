@@ -14,6 +14,14 @@ import logging
 import random
 from database import SupabaseClient
 
+# Try to import email service, but don't fail if it's not available
+try:
+    from email_service import EmailService
+    EMAIL_SERVICE_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Email service not available: {e}")
+    EMAIL_SERVICE_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/distribution", tags=["distribution"])
 
@@ -190,6 +198,7 @@ def blend_leads(lead_lists: List[List[Dict]]) -> List[Dict]:
 async def distribute_leads(request: DistributionRequest):
     """Main distribution endpoint - processes batches, checks history, and exports CSV"""
     try:
+        logger.info(f"Distribution request received: {request}")
         db_client = SupabaseClient()
         supabase = db_client.supabase
         
@@ -232,14 +241,28 @@ async def distribute_leads(request: DistributionRequest):
         # Filter out conflicting leads
         conflicting_lead_ids = {conflict['lead_id'] for conflict in history_check['conflicts']}
         clean_leads = [lead for lead in final_leads if lead['id'] not in conflicting_lead_ids]
-        
+
+        logger.info(f"Lead filtering results: {len(final_leads)} total leads, {len(conflicting_lead_ids)} conflicts, {len(clean_leads)} clean leads")
+
         if not clean_leads:
+            # Get client names for better error message
+            client_names = []
+            for client_id in request.client_ids:
+                client_response = supabase.table('clients').select('name').eq('id', client_id).single().execute()
+                if client_response.data:
+                    client_names.append(client_response.data['name'])
+
+            client_list = ', '.join(client_names) if client_names else 'selected clients'
+
+            error_message = f"All {len(final_leads)} selected leads have been previously distributed to {client_list}. Please select different leads or clients to avoid duplicates."
+            logger.error(f"Duplicate leads error: {error_message}")
             raise HTTPException(
-                status_code=400, 
-                detail="All selected leads have been previously distributed to these clients"
+                status_code=400,
+                detail=error_message
             )
         
         # Step 4: Create distribution record
+        logger.info(f"Creating distribution record for {len(clean_leads)} leads")
         # Calculate per-lead cost from sheet price
         per_lead_cost = request.selling_price_per_sheet / len(clean_leads) if len(clean_leads) > 0 else 0
 
@@ -257,14 +280,25 @@ async def distribute_leads(request: DistributionRequest):
             'createdat': datetime.now(timezone.utc).isoformat(),
             'exported_at': datetime.now(timezone.utc).isoformat()
         }
-        
+
+        logger.info(f"Inserting distribution data: {distribution_data}")
         distribution_response = supabase.table('lead_distributions').insert(distribution_data).execute()
         distribution_id = distribution_response.data[0]['id']
+        logger.info(f"Created distribution with ID: {distribution_id}")
         
         # Step 5: Update clients_history for each client
+        logger.info(f"Updating clients_history for {len(request.client_ids)} clients")
         for client_id in request.client_ids:
+            logger.info(f"Processing client_id: {client_id}")
             history_records = []
             for lead in clean_leads:
+                # Get source name from the batch selection
+                source_name = None
+                for batch_selection in request.batches:
+                    if batch_selection.batch_id == lead.get('uploadbatchid'):
+                        source_name = batch_selection.source_name
+                        break
+
                 history_record = {
                     'client_id': client_id,
                     'distribution_id': distribution_id,
@@ -283,15 +317,19 @@ async def distribute_leads(request: DistributionRequest):
                     'selling_cost': per_lead_cost,
                     'source_batch_id': lead.get('uploadbatchid'),
                     'source_supplier_id': lead.get('supplierid'),
+                    'source_name': source_name,
                     'distributed_at': datetime.now(timezone.utc).isoformat()
                 }
                 history_records.append(history_record)
             
             # Insert in batches to avoid size limits
+            logger.info(f"Inserting {len(history_records)} history records for client {client_id}")
             batch_size = 100
             for i in range(0, len(history_records), batch_size):
                 batch = history_records[i:i + batch_size]
+                logger.info(f"Inserting batch {i//batch_size + 1} with {len(batch)} records")
                 supabase.table('clients_history').insert(batch).execute()
+                logger.info(f"Successfully inserted batch {i//batch_size + 1}")
         
         # Step 6: Generate CSV filename
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -311,9 +349,16 @@ async def distribute_leads(request: DistributionRequest):
                    f"Filtered out {len(conflicting_lead_ids)} previously distributed leads."
         )
 
+    except HTTPException as he:
+        # Re-raise HTTPException as-is (these are intentional errors like duplicate leads)
+        logger.error(f"HTTPException in lead distribution: {he.detail}")
+        raise he
     except Exception as e:
-        logger.error(f"Error in lead distribution: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"Unexpected error in lead distribution: {str(e)}")
+        logger.error(f"Full traceback: {error_details}")
+        raise HTTPException(status_code=500, detail=f"Distribution failed: {str(e)}")
 
 @router.get("/export-csv/{distribution_id}")
 async def export_distribution_csv(distribution_id: int):
@@ -452,3 +497,112 @@ async def get_distribution_history(skip: int = 0, limit: int = 50):
     except Exception as e:
         logger.error(f"Error fetching distribution history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Email sending models
+class EmailDistributionRequest(BaseModel):
+    distribution_id: int
+    client_emails: List[str]
+    distribution_name: Optional[str] = None
+
+
+@router.post("/send-email")
+async def send_distribution_email(request: EmailDistributionRequest):
+    """Send distribution CSV file to client emails via SendGrid"""
+    try:
+        db_client = SupabaseClient()
+        supabase = db_client.supabase
+
+        # Get distribution info
+        dist_response = supabase.table('lead_distributions').select(
+            'id, distribution_name, exported_filename, createdat'
+        ).eq('id', request.distribution_id).single().execute()
+
+        if not dist_response.data:
+            raise HTTPException(status_code=404, detail="Distribution not found")
+
+        # Get leads from clients_history for CSV generation
+        history_response = supabase.table('clients_history').select(
+            'firstname, lastname, email, phone, companyname, taxid, '
+            'address, city, state, zipcode, country'
+        ).eq('distribution_id', request.distribution_id).execute()
+
+        if not history_response.data:
+            raise HTTPException(status_code=404, detail="No leads found for this distribution")
+
+        # Generate CSV content
+        output = io.StringIO()
+        fieldnames = [
+            's.no', 'firstname', 'lastname', 'email', 'phone', 'companyname',
+            'taxid', 'address', 'city', 'state', 'zipcode', 'country'
+        ]
+
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for idx, lead in enumerate(history_response.data, 1):
+            row = {
+                's.no': idx,
+                'firstname': lead.get('firstname', ''),
+                'lastname': lead.get('lastname', ''),
+                'email': lead.get('email', ''),
+                'phone': lead.get('phone', ''),
+                'companyname': lead.get('companyname', ''),
+                'taxid': lead.get('taxid', ''),
+                'address': lead.get('address', ''),
+                'city': lead.get('city', ''),
+                'state': lead.get('state', ''),
+                'zipcode': lead.get('zipcode', ''),
+                'country': lead.get('country', '')
+            }
+            writer.writerow(row)
+
+        csv_content = output.getvalue()
+        output.close()
+
+        # Prepare filename
+        filename = dist_response.data['exported_filename'] or f"distribution_{request.distribution_id}.csv"
+        distribution_name = request.distribution_name or dist_response.data.get('distribution_name')
+
+        # Initialize email service and send emails
+        if not EMAIL_SERVICE_AVAILABLE:
+            raise HTTPException(status_code=500, detail="Email service is not available. Please check SendGrid configuration.")
+
+        email_service = EmailService()
+        result = email_service.send_distribution_email(
+            client_emails=request.client_emails,
+            csv_content=csv_content,
+            filename=filename,
+            distribution_name=distribution_name,
+            distribution_id=request.distribution_id
+        )
+
+        # Log the email sending activity
+        logger.info(f"Distribution {request.distribution_id} emailed to {len(request.client_emails)} clients")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error sending distribution email: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/test-email")
+async def test_email_service():
+    """Test SendGrid email service connection"""
+    try:
+        if not EMAIL_SERVICE_AVAILABLE:
+            return {
+                'success': False,
+                'message': 'Email service is not available. Please check SendGrid configuration and dependencies.'
+            }
+
+        email_service = EmailService()
+        result = email_service.test_connection()
+        return result
+    except Exception as e:
+        logger.error(f"Error testing email service: {str(e)}")
+        return {
+            'success': False,
+            'message': f'Email service test failed: {str(e)}'
+        }
